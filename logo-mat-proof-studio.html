@@ -145,7 +145,7 @@ details[open] summary{margin-bottom:10px}
     <button type="button" class="btn" id="qZip">Download ready (.zip)</button>
   </div>
   <label class="check"><input type="checkbox" id="qAuto"> Every 10 minutes while this page is open: look for new orders and design them</label>
-  <p class="hint" id="qMsg">Designs here are proposals: open each one to check it before uploading. The list is kept in this browser.</p>
+  <p class="hint" id="qMsg">Quickest: open the portal's design queue and click the “Send to Mat Studio” bookmark there; every sketch in it is added and designed. Designs are proposals: open each one to check it before uploading.</p>
   <div class="qgrid" id="qGrid"></div>
 </details>
 <div class="app">
@@ -158,14 +158,14 @@ details[open] summary{margin-bottom:10px}
         <div class="lk"><input type="text" id="lookupNo" class="mono" inputmode="numeric" placeholder="e.g. 5128435" aria-label="Sketch or design number"><button type="submit" class="btn primary" id="bGo">Go</button></div>
         <p class="hint" id="lookupMsg" hidden></p>
         <details id="bmBox" class="bm"><summary>One-time setup: the portal bookmark</summary>
-          <p class="hint">Only needed when Go cannot read the portal. Add the bookmark once:</p>
+          <p class="hint">Sends the portal's design queue (or one order) to this studio. Add it once (copy it again if you added an older version):</p>
           <button type="button" class="btn small" id="bmCopy">1. Copy bookmark</button>
           <ol class="hint bmSteps">
             <li>Press <b>Ctrl+Shift+B</b> to show the bookmarks bar.</li>
             <li>Right-click the bar, choose <b>Add page…</b> (Edge: <b>Add favourite</b>).</li>
             <li>Name: <b>Send to Mat Studio</b>. URL: delete what is there and press <b>Ctrl+V</b>. Save.</li>
           </ol>
-          <p class="hint">Then on any order page in the portal, click the bookmark: the order and its artwork open here. Pressing Go above opens the order page for you.</p>
+          <p class="hint">Then click the bookmark on the portal's <b>design queue</b> page: every sketch is added to the order queue here and designed. On a single order page it opens that order here.</p>
         </details>
       </form>
       <div id="orderCard" class="ordercard" hidden></div>
@@ -2946,11 +2946,20 @@ function hasBookmark(){ try{ return localStorage.getItem("matstudio.bm")==="1"; 
 /* The bookmark runs on the portal page (where the browser is already let in) and hands the page to this studio. */
 function bookmarkCode(){
   const target=location.origin+location.pathname;
-  return "javascript:(function(){var m=location.search.match(/designNumber=(\\d+)/);if(!m||!/Design Number/i.test(document.body.innerText)){alert('Open a NEW Design Instructions page first.');return;}"
+  // on the queue page it sends the list of sketches; on an order page it sends that order
+  return "javascript:(function(){if(/ViewQueue/i.test(location.pathname)){var r=[],a=document.querySelectorAll('a[href*=\"designNumber=\"]');"
+    +"for(var i=0;i<a.length;i++){var m=a[i].href.match(/designNumber=(\\d+)/),u=a[i].closest('ul'),c=u?u.children:[],t=function(k){return c[k]?c[k].textContent.trim():'';};if(m)r.push([m[1],t(2),t(3),t(4),t(5)]);}"
+    +"if(!r.length){alert('No sketches in the queue.');return;}window.open('"+target+"#queue='+encodeURIComponent(JSON.stringify(r)),'matstudio');return;}"
+    +"var m=location.search.match(/designNumber=(\\d+)/);if(!m||!/Design Number/i.test(document.body.innerText)){alert('Open the design queue or a NEW Design Instructions page first.');return;}"
     +"window.open('"+target+"#portal='+m[1]+'&html='+encodeURIComponent(document.documentElement.outerHTML),'matstudio');})();";
 }
 async function readHash(){
-  const h=location.hash; if(!h.startsWith("#portal=")) return;
+  const h=location.hash;
+  if(h.startsWith("#queue=")){ history.replaceState(null,"",location.pathname+location.search);
+    try{ localStorage.setItem("matstudio.bm","1"); }catch(e){}
+    let rows=[]; try{ rows=JSON.parse(decodeURIComponent(h.slice(7))); }catch(e){ return; }
+    await apiReady; qFromPortal(rows); return; }
+  if(!h.startsWith("#portal=")) return;
   const p=new URLSearchParams(h.slice(1)), n=p.get("portal"), html=p.get("html");
   history.replaceState(null,"",location.pathname+location.search);
   if(!n||!html) return;
@@ -2970,11 +2979,11 @@ function qRender(){
   const g=$("qGrid"); g.innerHTML="";
   for(const it of [...Q.items].reverse()){ const f=Q.files.get(it.n), c=document.createElement("div"); c.className="qcard"+(it.status==="done"?" isdone":"");
     c.innerHTML=`<div class="qimg">${f&&f.thumb?`<img alt="Proof for ${esc(it.n)}" src="${f.thumb}">`:(it.status==="designing"?"designing…":"no proof yet")}</div>
-      <h4>${esc(it.n)} <span>${esc(it.name||"")}</span></h4>
+      <h4>${esc(it.n)} <span title="${esc(it.name||"")}">${esc(it.name||"")}</span></h4>${it.style||it.division?`<div class="hint">${esc([it.style,it.division,it.date].filter(Boolean).join(" · "))}</div>`:""}
       <div><span class="qst ${it.status}">${Q_LABEL[it.status]||it.status}</span> <span class="hint">${esc(it.size||"")}</span></div>
       <div class="qnote">${esc(it.note||"")}</div>
       <div class="qbtns"><button type="button" class="btn" data-q="open">Open</button>${f&&f.ai?`<button type="button" class="btn" data-q="ai">.ai</button><button type="button" class="btn" data-q="wmf">.wmf</button>`:`<button type="button" class="btn" data-q="redo"${Q.running?" disabled":""}>Design</button>`}
-      <button type="button" class="btn" data-q="done">${it.status==="done"?"Undo done":"Done"}</button><button type="button" class="btn" data-q="del" aria-label="Remove ${esc(it.n)} from the list">×</button></div>`;
+      <a class="btn" href="${esc((apiPortal||"https://designupload.logomatsllc.com")+"/Design/Upload/"+it.n)}" target="_blank" rel="noopener">Upload</a><button type="button" class="btn" data-q="done">${it.status==="done"?"Undo done":"Done"}</button><button type="button" class="btn" data-q="del" aria-label="Remove ${esc(it.n)} from the list">×</button></div>`;
     c.querySelectorAll("[data-q]").forEach(b=>b.onclick=()=>qAction(it,b.dataset.q)); g.appendChild(c); }
   $("qRun").disabled=Q.running; $("qFind").disabled=Q.running;
 }
@@ -3044,6 +3053,16 @@ async function qRunAll(list){
   Q.running=false; qRender();
   const rd=Q.items.filter(i=>i.status==="ready").length, ck=Q.items.filter(i=>i.status==="check").length;
   qMsg(todo.length? `Finished: ${rd} ready, ${ck} to check. Open each proof to review it before uploading.` : "Nothing new to design.");
+}
+/* The portal's design queue (behind its log-in) arrives from the bookmark: add new sketches, retire ones that left the queue, design the new ones. */
+function qFromPortal(rows){
+  const nums=new Set(); let added=0;
+  for(const [n,name,style,date,div] of rows){ if(!/^\d{4,10}$/.test(n)) continue; nums.add(n);
+    let it=Q.items.find(i=>i.n===n); if(!it){ it=qItem(n); added++; } Object.assign(it,{name:it.name||name, style, date, division:div, fromQueue:true}); }
+  let gone=0; for(const it of Q.items) if(it.fromQueue && !nums.has(it.n) && it.status!=="done" && it.status!=="designing"){ it.status="done"; it.note="No longer in the portal queue (uploaded)."; gone++; }
+  $("queue").open=true; qSave(); qRender(); window.scrollTo({top:0,behavior:"smooth"});
+  qMsg(`${nums.size} sketches in the portal queue: ${added} new${gone?", "+gone+" left the queue":""}.`+(added?" Designing the new ones…":""));
+  if(added) qRunAll();
 }
 $("qFind").onclick=qFind;
 $("qRun").onclick=()=>qRunAll();
