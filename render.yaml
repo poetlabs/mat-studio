@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: mat-studio
+    runtime: python
+    plan: free
+    buildCommand: "python --version"
+    startCommand: "python matstudio.py"
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: MATSTUDIO_KEY
+        sync: false
