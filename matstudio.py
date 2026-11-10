@@ -140,7 +140,7 @@ def parse_order(page, number):
     for n in root.walk():
         ps = [k for k in n.elements() if k.tag == "p"]
         labels = [clean(p.text()) for p in ps]
-        if len(labels) >= 3 and all(l.endswith(":") for l in labels) and n.parent is not None:
+        if len(labels) >= 3 and all(l.endswith(":") for l in labels) and any(re.match(r"(size|background colou?r|style)\s*:", l, re.I) for l in labels) and n.parent is not None:
             sibs = n.parent.elements()
             i = sibs.index(n)
             if i + 1 < len(sibs):

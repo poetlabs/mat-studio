@@ -2605,7 +2605,7 @@ function render(){
   const px=Math.min((W-2*pad)/L0.matW,(H-2*pad)/L0.matH), ox=(W-L0.matW*px)/2, oy=(H-L0.matH*px)/2;
   const L=drawMat(ctx,px,ox,oy,S.view);
   if(S.view==="proof") drawDims(ctx,L,px,ox,oy);
-  $("stageTitle").textContent=`${S.w} × ${S.h} cm · ${STYLES[S.style].label}`;
+  $("stageTitle").textContent=`${S.sizeMissing?"size needed":S.w+" × "+S.h+" cm"} · ${STYLES[S.style].label}`;
   const shapes=S.layers.reduce((a,l)=>a+l.paths.length,0);
   $("stats").innerHTML = S.plain? "<span>Plain mat, no logo</span>" : S.photo&&S.srcCanvas? `<span>Photo <b>${(L.logoW/10).toFixed(1)} × ${(L.logoH/10).toFixed(1)} cm</b></span><span>Placed as an image</span>` : S.idx? `<span>Logo <b>${(L.logoW/10).toFixed(1)} × ${(L.logoH/10).toFixed(1)} cm</b></span><span>Logo yarns <b>${S.layers.length}</b></span><span>Vector shapes <b>${shapes}</b></span><span>Smallest detail kept <b>${S.minDetail} mm</b></span>` : "<span>Load a logo to start.</span>";
 }
@@ -2850,7 +2850,7 @@ function parseOrderHtml(htmlText,n){
     for(let i=0;i<lines.length;i++){ if(re1.test(lines[i]) && i+1<lines.length) return lines[i+1]; const m=lines[i].match(re2); if(m) return m[1].trim(); } return ""; };
   const fields=[]; let fieldsGuessed=false;
   for(const box of d.querySelectorAll("div")){ const ps=[...box.children].filter(c=>c.tagName==="P"), labels=ps.map(p=>clean(p.textContent));
-    if(labels.length>=3 && labels.every(l=>l.endsWith(":"))){ const nx=box.nextElementSibling, vals=nx? [...nx.children].filter(c=>c.tagName==="P").map(p=>clean(p.textContent).replace(/\n/g," ")) : [];
+    if(labels.length>=3 && labels.every(l=>l.endsWith(":")) && labels.some(l=>/^(size|background colou?r|style)\s*:/i.test(l))){ /* the order details, not the customer block (Name, Email, Account) */ const nx=box.nextElementSibling, vals=nx? [...nx.children].filter(c=>c.tagName==="P").map(p=>clean(p.textContent).replace(/\n/g," ")) : [];
       const L=labels.map(l=>l.replace(/:$/,"").trim());
       if(vals.length===L.length) L.forEach((l,j)=>fields.push([l,vals[j]]));
       else { // the portal leaves blank values out: place each value by what it looks like
@@ -3010,7 +3010,7 @@ function fillFromOrder(txt){
   if(!(w>0&&h>0)){ const s2=parseSize(line("Size Note")); if(s2){ [w,h]=s2; } }
   if(w>0&&h>0){ const o=line("Style")||""; if(/landscape/i.test(o)){ [w,h]=[Math.max(w,h),Math.min(w,h)]; } else if(/portrait/i.test(o)){ [w,h]=[Math.min(w,h),Math.max(w,h)]; }
     S.sizeMissing=false; $("matW").classList.remove("need"); $("matH").classList.remove("need"); S.w=Math.round(w*10)/10; S.h=Math.round(h*10)/10; $("matW").value=S.w; $("matH").value=S.h; $("preset").value=PRESETS.some(([a,b])=>a===S.w&&b===S.h)?S.w+"x"+S.h:""; done.push(S.w+" × "+S.h+" cm"); }
-  else { missed.push("SIZE — type the mat size by hand"); $("matW").value=""; $("matH").value=""; S.sizeMissing=true; $("matW").classList.add("need"); $("matH").classList.add("need"); toast("Mat size not found on the order: type it in Width / Height."); }
+  else { missed.push("SIZE — type the mat size by hand"); $("matW").value=""; $("matH").value=""; $("preset").value=""; S.sizeMissing=true; $("matW").classList.add("need"); $("matH").classList.add("need"); toast("Mat size not found on the order: type it in Width / Height."); }
   const cn=line("Mat Corner"); if(cn){ S.corner=/round/i.test(cn)?"rounded":"square"; $("corner").value=S.corner; }
   const p=pal();
   const bgT=line("Background Colou?r"), bgY=findYarn(p,bgT); if(bgY){ S.bg=bgY.label; S.bgLocked=true; S.bgSrc="order"; S.bgOrder=bgY.label; done.push("background "+bgY.label); } else if(bgT) missed.push("background \""+bgT+"\"");
@@ -3049,7 +3049,7 @@ bind("designId","id",updateSpec,v=>v.trim()||"design");
 $("style").addEventListener("change",e=>{ S.style=e.target.value; fillYarnSelects();
   const p=pal(); for(const c of S.clusters){ const m=nearestYarn(p,c.lab); c.yarn=m.yarn.label; c.de=m.de; } separateYarns(); applyLogoYarn(); decideBg(); contrastSwap(); fillYarnSelects();
   renderYarnMap(); retrace(); updateSpec(); });
-$("preset").addEventListener("change",e=>{ if(!e.target.value) return; const [w,h]=e.target.value.split("x").map(Number); S.w=w;S.h=h; $("matW").value=w;$("matH").value=h; render(); updateSpec(); });
+$("preset").addEventListener("change",e=>{ if(!e.target.value) return; const [w,h]=e.target.value.split("x").map(Number); S.w=w;S.h=h; S.sizeMissing=false; $("matW").classList.remove("need"); $("matH").classList.remove("need"); $("matW").value=w;$("matH").value=h; render(); updateSpec(); });
 const sizeChange=()=>{ $("preset").value = PRESETS.some(([w,h])=>w===S.w&&h===S.h)? S.w+"x"+S.h : ""; render(); updateSpec(); };
 bind("matW","w",sizeChange,v=>Math.max(30,+v||30)); bind("matH","h",sizeChange,v=>Math.max(30,+v||30));
 ["matW","matH"].forEach(id=>$(id).addEventListener("input",()=>{ if(+$("matW").value>0 && +$("matH").value>0){ $("matW").classList.remove("need"); $("matH").classList.remove("need"); S.sizeMissing=false; } }));
