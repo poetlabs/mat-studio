@@ -2322,7 +2322,9 @@ function decideBg(){ const p=pal(); S.bgNote="";
 function contrastSwap(){ const p=pal(), bg=yarnBy(p,S.innerPanel||S.bg); if(!bg) return; S.swapped=[];
   const orderCols=(S.logoYarn==="set"?S.logoSet:S.logoYarn!=="auto"?[S.logoYarn]:[]).map(l=>yarnBy(p,l)).filter(y=>y && de2000(y.lab,bg.lab)>=10);
   for(const c of S.clusters){ if(c.bg||(c.hole&&c.yarn===S.bg&&!S.innerPanel)) continue; const y=yarnBy(p,c.yarn); if(!y) continue;
-    if(c.yarn===bg.label || de2000(y.lab,bg.lab)<10){ const to=orderCols[0]||extremeYarn(p,bg.lab[0]>50); if(to && to.label!==c.yarn){ S.swapped.push(c.yarn+" → "+to.label); c.yarn=to.label; c.de=de2000(c.lab,to.lab); } } } }
+    // also grey on a near-black (or near-white) mat of almost the same lightness: dark grey crest on black (Freemen's 5157281)
+    const lowL= Math.abs(y.lab[0]-bg.lab[0])<18 && chromaOf(y.lab)<12 && chromaOf(bg.lab)<12;
+    if(c.yarn===bg.label || de2000(y.lab,bg.lab)<10 || lowL){ const to=orderCols[0]||extremeYarn(p,bg.lab[0]>50); if(to && to.label!==c.yarn){ S.swapped.push(c.yarn+" → "+to.label); c.yarn=to.label; c.de=de2000(c.lab,to.lab); } } } }
 function assignPixels(data,N,cents){
   const idx=new Uint8Array(N), cache=new Map();
   for(let i=0;i<N;i++){ const p=i*4; if(data[p+3]<128){ idx[i]=255; continue; }
@@ -2459,7 +2461,10 @@ function doTrace(){
   if(!S.keepThin) masks.forEach(m=>thickenThin(m,w,h,MIN_STROKE_MM/2/mmPerPx));
   const opts={pathomit:Math.max(8,Math.round(dpx*3)),rightangleenhance:false};
   const rs=Math.max(w,h)/1400; // detail windows scale with the working resolution
-  const fit={round:S.roundMM>0? S.roundMM/mmPerPx : 0, tol:0.45+S.smooth*0.15, lineTol:0.6, lineBias:0.06, minLine:Math.max(Math.round(14*rs),Math.round(6/mmPerPx)), trim:Math.round(3*rs), k:Math.round(4*rs), cornerAngle:1.0, cornerCut:1.2*rs, capAngle:1.75, keepAngle:0.9, capLen:S.roundMM>0? 2.6*S.roundMM/mmPerPx : 0, smoothPasses:Math.round(4*rs), sharp:(S.upscale||1)<=1.6};
+  // enlarged low-res artwork: one source pixel is several work pixels, so JPEG ripples along edges are that big too;
+  // fitting tolerances grow with the enlargement so straight edges come out straight (Ressos 5157439)
+  const fitScale=(S.upscale||1)>1.6? Math.min(window.FIT_SCALE_MAX||5, 1+(window.FIT_SCALE_K||1.0)*((S.upscale||1)-1)) : 1;
+  const fit={round:S.roundMM>0? S.roundMM/mmPerPx : 0, tol:(0.45+S.smooth*0.15)*fitScale, lineTol:0.6*fitScale, lineBias:0.06, minLine:Math.max(Math.round(14*rs),Math.round(6/mmPerPx)), trim:Math.round(3*rs), k:Math.round(4*rs), cornerAngle:1.0, cornerCut:1.2*rs, capAngle:1.75, keepAngle:0.9, capLen:S.roundMM>0? 2.6*S.roundMM/mmPerPx : 0, smoothPasses:Math.round(4*rs), sharp:(S.upscale||1)<=1.6};
   S.pendingOrder=order; S.traceJob++; busy("Tracing "+order.length+" colour layer"+(order.length===1?"":"s")+"…");
   if(!order.length){ S.layers=[]; busy(null); render(); updateSpec(); return; }
   getWorker().postMessage({job:S.traceJob,w,h,masks,opts,fit});
@@ -2554,6 +2559,9 @@ function layout(){
     const rx=matW/2-bw, ry=matH-2*bw, t=1/Math.sqrt(a*a/(4*rx*rx)+1/(ry*ry)); aw=a*t*0.82; ah=t*0.82; ccy=matH-bw-t*0.5; }
   let k=Math.max(1e-6,Math.min(aw/bb.w, ah/bb.h))*S.scale;
   let cx=matW/2+S.dx/100*matW, cy=ccy+S.dy/100*matH;
+  if(S.corner==="square"||S.corner==="rounded"){ const lw=bb.w*k, lh=bb.h*k, m0=off+margin;
+    if(S.alignX==="left") cx=m0+lw/2+S.dx/100*matW; else if(S.alignX==="right") cx=matW-m0-lw/2+S.dx/100*matW;
+    if(S.alignY==="top") cy=m0+lh/2+S.dy/100*matH; else if(S.alignY==="bottom") cy=matH-m0-lh/2+S.dy/100*matH; }
   if(S.photo && S.photoFit==="bleed" && S.srcCanvas && !S.plain){ k=Math.max((matW-2*bw)/bb.w,(matH-2*bw)/bb.h); cx=matW/2; cy=matH/2; }
   return {matW,matH,bw,k,panel,tx:cx-(bb.x+bb.w/2)*k,ty:cy-(bb.y+bb.h/2)*k,logoW:bb.w*k,logoH:bb.h*k,
     radius:S.corner==="rounded"? Math.min(matW,matH)*0.06 : 0};
@@ -3121,7 +3129,7 @@ function findCodes(p,text){
 const BG_WORDS=/(colou?r preference|preferred colou?r|mat colou?r|colou?r of the mat|couleur du tapis|farbe der matte|fond|background|\bbg\b|hintergrund|fondo|fundo|achtergrond|pozad|háttér|hatter|tło|tlo|sfondo|bakgrund|baggrund|tausta|grund)/i;
 const LOGO_WORDS=/(logo|texte?|text|schrift|lettering|letters|tekst|testo|texto|písmo|felirat|napis|szöveg)/i;
 function readSpecial(p,sp){
-  const res={bg:null, logo:[], shape:null, photo:false, keepAll:false, edgeCm:null, notes:[]}; if(!sp) return res;
+  const res={bg:null, logo:[], shape:null, photo:false, keepAll:false, edgeCm:null, alignX:null, alignY:null, notes:[]}; if(!sp) return res;
   { const m=sp.match(/(\d+(?:[.,]\d+)?)\s*cm\s*(?:du|de|des|from(?: the)?|vom|van|dal|of(?: the)?)?\s*(?:bord|edge|border|rand|kant|bordo|margin|marge)/i) || sp.match(/(?:margin|marge|bord|edge|rand|abstand)\D{0,20}(\d+(?:[.,]\d+)?)\s*cm/i);
     if(m){ const v=parseFloat(m[1].replace(",",".")); if(v>0 && v<60){ res.edgeCm=v; res.notes.push("Margin "+v+" cm from the edge (from instructions)."); } } }
   const clauses=sp.split(/\n|\/(?![\d])|;|\.(?=\s)/).map(c=>c.trim()).filter(Boolean);
@@ -3138,6 +3146,11 @@ function readSpecial(p,sp){
   if(/(half|1\/2|demi|halb|halv|semi)[^a-z]{0,3}\s*(round|rond|rund|circle|cercle|kreis|cirkel)|\barche?\b|\bbogen\b|\bdome\b|dôme/.test(t)) res.shape="arch";
   else if(/\b(ovale?|ovaal|oválne|ovális)\b/.test(t)) res.shape="oval";
   else if(/\b(circle|circular|round mat|rond|runde?|kreis|cirkel|kör|kruh)\b|diameter|diamètre|durchmesser|(^|\s)ø\s*\d/.test(t) && !/round(ed)?\s+corner/.test(t)) res.shape="circle";
+  { // placement: "le logo doit être placé à gauche" (Deco Cuisine 5157385); only when one side is named
+    const L=/\b(left|links|izquierda|sinistra|esquerda)\b|à gauche|a gauche/.test(t), R=/\b(right|rechts|derecha|destra|direita)\b|à droite|a droite/.test(t);
+    const T=/\b(top|oben|arriba)\b|en haut|in alto|bovenaan/.test(t), B=/\b(bottom|unten|abajo)\b|en bas|in basso|onderaan/.test(t);
+    if(L!==R) res.alignX=L?"left":"right"; if(T!==B) res.alignY=T?"top":"bottom";
+    if(res.alignX||res.alignY) res.notes.push("Logo placed "+[res.alignY,res.alignX].filter(Boolean).join(" ")+" (from instructions): check the position and size."); }
   if(/photo\s*-?\s*realisti|photoréalist|fotorealist|as a photo|print the photo/.test(t)) res.photo=true;
   if(/(do not|don't|dont|please don't)\s+(remove|delete|leave out)|include all|keep all|nothing removed|alle (texte|details)|nichts (weg|entfern)/.test(t)) res.keepAll=true;
   const old=t.match(/old mat\s*:?\s*(\d{6,})|re-?order|same (design )?as (before|last|old)|wie (die |das )?(alte|letzte)/); if(old) res.notes.push("Reorder"+(old[1]?" of mat "+old[1]:"")+": check the previous design first.");
@@ -3150,7 +3163,7 @@ function fillFromOrder(txt){
   const num=v=>parseFloat(String(v).replace(",","."));
   const done=[], missed=[];
   // every order starts from a clean slate
-  S.edgeCm=null; S.innerPanel=null; S.bgLocked=false; S.bgSrc=null; S.bgOrder=null; S.photoReq=false; S.photoUser=false; S.logoSet=[]; S.logoYarn="auto"; S.photo=false; S.keepAll=false; S.orderNotes=[]; S.corner="square"; $("corner").value="square";
+  S.edgeCm=null; S.alignX=null; S.alignY=null; S.innerPanel=null; S.bgLocked=false; S.bgSrc=null; S.bgOrder=null; S.photoReq=false; S.photoUser=false; S.logoSet=[]; S.logoYarn="auto"; S.photo=false; S.keepAll=false; S.orderNotes=[]; S.corner="square"; $("corner").value="square";
   S.minDetail=3; $("minDetail").value=3; const ph0=$("photoMode"); if(ph0) ph0.checked=false;
   const id=(txt.match(/Design Number\s*:?\s*(\d{4,})/i)||txt.match(/Design Number[\s\S]{0,60}?\b(\d{6,8})\b/i)||[])[1]; if(id){ S.id=id; $("designId").value=id; done.push("design "+id); } else missed.push("design ID");
   const prod=(txt.match(/^[ \t]*\d+\s*-\s*(.*(?:impression|colou?r\s*star|promo|scrape).*)$/im)||[])[1]||"";
@@ -3183,6 +3196,7 @@ function fillFromOrder(txt){
     if(set.length===1){ S.logoYarn=set[0]; S.logoSet=[]; } else if(set.length>1){ S.logoSet=set; S.logoYarn="set"; }
     notes.push("logo "+set.join(" + ")+" (from instructions)"); }
   if(SP.edgeCm) S.edgeCm=SP.edgeCm;
+  S.alignX=SP.alignX; S.alignY=SP.alignY; if(SP.alignX||SP.alignY) notes.push("logo "+[SP.alignY,SP.alignX].filter(Boolean).join(" "));
   if(SP.shape){ S.corner=SP.shape; $("corner").value=SP.shape; notes.push(SP.shape+" mat"); }
   if(SP.photo){ S.photoReq=true; notes.push("photo-realistic artwork requested"); }
   if(SP.keepAll){ S.keepAll=true; S.minDetail=1; $("minDetail").value=1; notes.push("keep all small details"); }
