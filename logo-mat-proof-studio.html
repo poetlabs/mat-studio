@@ -106,6 +106,24 @@ input.need{outline:2px solid #d33;outline-offset:1px;background:color-mix(in srg
 details summary{cursor:pointer;font-size:12px;color:var(--muted);font-weight:500}
 details[open] summary{margin-bottom:10px}
 .sample-tag{font-family:var(--f-mono);font-size:11px;color:var(--warn);border:1px solid currentColor;border-radius:3px;padding:0 5px;margin-left:6px}
+.queue{margin-bottom:14px}
+.queue>summary{font-family:var(--f-display);font-size:15px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;color:var(--muted)}
+.qbar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.qbar .f{min-width:0}
+.qbar textarea{font:13px var(--f-mono);width:min(320px,100%);height:38px;resize:vertical;background:var(--field);color:var(--ink);border:1px solid var(--line);border-radius:5px;padding:8px}
+.qbar input[type=text]{width:120px}
+.qgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-top:12px}
+.qcard{border:1px solid var(--line);border-radius:6px;background:var(--field);padding:8px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.qcard .qimg{aspect-ratio:16/10;background:var(--stage);border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:12px;color:var(--muted)}
+.qcard .qimg img{max-width:100%;max-height:100%}
+.qcard h4{margin:0;font:600 14px var(--f-body);display:flex;justify-content:space-between;gap:6px}
+.qcard h4 span{font:12px var(--f-mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qcard .qnote{font-size:12px;color:var(--muted);min-height:16px}
+.qcard .qbtns{display:flex;flex-wrap:wrap;gap:6px}
+.qcard .qbtns .btn{padding:5px 8px;font-size:12px}
+.qst{font:600 11px var(--f-mono);text-transform:uppercase;letter-spacing:.06em;padding:1px 6px;border-radius:3px;border:1px solid currentColor}
+.qst.ready{color:var(--good)} .qst.check{color:var(--warn)} .qst.failed{color:var(--bad)} .qst.new,.qst.designing{color:var(--muted)} .qst.done{color:var(--accent)}
+.qcard.isdone{opacity:.6}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -115,6 +133,21 @@ details[open] summary{margin-bottom:10px}
   <p>Drop the customer's logo, pick the mat style. It is redrawn as vectors, snapped to that style's yarn colours, placed on the mat, and packed as .ai + .wmf for upload.</p>
 </header>
 
+<details class="panel queue" id="queue">
+  <summary>Order queue: design several sketches at once</summary>
+  <div class="qbar">
+    <label class="f">Sketch numbers (paste, one per line)<textarea id="qList" class="mono" placeholder="5156381&#10;5156405"></textarea></label>
+    <span class="hint" style="padding-bottom:10px">or</span>
+    <label class="f">Scan from number<input type="text" id="qFrom" class="mono" inputmode="numeric" placeholder="e.g. 5156775"></label>
+    <label class="f">Look at<select id="qCount"><option value="20">next 20</option><option value="40">next 40</option><option value="60">next 60</option></select></label>
+    <button type="button" class="btn" id="qFind">Find orders</button>
+    <button type="button" class="btn primary" id="qRun">Design all new</button>
+    <button type="button" class="btn" id="qZip">Download ready (.zip)</button>
+  </div>
+  <label class="check"><input type="checkbox" id="qAuto"> Every 10 minutes while this page is open: look for new orders and design them</label>
+  <p class="hint" id="qMsg">Designs here are proposals: open each one to check it before uploading. The list is kept in this browser.</p>
+  <div class="qgrid" id="qGrid"></div>
+</details>
 <div class="app">
   <!-- WORK ORDER -->
   <div class="col">
@@ -2926,6 +2959,99 @@ async function readHash(){
   try{ await useOrder(parseOrderHtml(html,n)); }catch(e){ lookupMsg(e.message); }
 }
 window.addEventListener("hashchange",readHash);
+/* ---------- order queue: find new sketch numbers, design them one after another, list them for review ---------- */
+const Q={items:[], files:new Map(), running:false, timer:null}, QKEY="matstudio.queue";
+function qMsg(t){ $("qMsg").textContent=t; }
+function qLoad(){ try{ const j=JSON.parse(localStorage.getItem(QKEY)||"{}"); Q.items=(j.items||[]).map(i=>Object.assign(i, i.status==="designing"?{status:"new"}:{})); if(j.next) $("qFrom").value=j.next; }catch(e){} }
+function qSave(){ try{ localStorage.setItem(QKEY,JSON.stringify({items:Q.items.slice(-200), next:$("qFrom").value})); }catch(e){} }
+function qItem(n){ let it=Q.items.find(i=>i.n===n); if(!it){ it={n, status:"new", name:"", note:""}; Q.items.push(it); } return it; }
+const Q_LABEL={new:"new", designing:"designing…", ready:"ready", check:"check", failed:"failed", done:"done"};
+function qRender(){
+  const g=$("qGrid"); g.innerHTML="";
+  for(const it of [...Q.items].reverse()){ const f=Q.files.get(it.n), c=document.createElement("div"); c.className="qcard"+(it.status==="done"?" isdone":"");
+    c.innerHTML=`<div class="qimg">${f&&f.thumb?`<img alt="Proof for ${esc(it.n)}" src="${f.thumb}">`:(it.status==="designing"?"designing…":"no proof yet")}</div>
+      <h4>${esc(it.n)} <span>${esc(it.name||"")}</span></h4>
+      <div><span class="qst ${it.status}">${Q_LABEL[it.status]||it.status}</span> <span class="hint">${esc(it.size||"")}</span></div>
+      <div class="qnote">${esc(it.note||"")}</div>
+      <div class="qbtns"><button type="button" class="btn" data-q="open">Open</button>${f&&f.ai?`<button type="button" class="btn" data-q="ai">.ai</button><button type="button" class="btn" data-q="wmf">.wmf</button>`:`<button type="button" class="btn" data-q="redo"${Q.running?" disabled":""}>Design</button>`}
+      <button type="button" class="btn" data-q="done">${it.status==="done"?"Undo done":"Done"}</button><button type="button" class="btn" data-q="del" aria-label="Remove ${esc(it.n)} from the list">×</button></div>`;
+    c.querySelectorAll("[data-q]").forEach(b=>b.onclick=()=>qAction(it,b.dataset.q)); g.appendChild(c); }
+  $("qRun").disabled=Q.running; $("qFind").disabled=Q.running;
+}
+async function qAction(it,a){
+  const f=Q.files.get(it.n);
+  if(a==="open"){ window.scrollTo({top:0,behavior:"smooth"}); $("lookupNo").value=it.n; await lookupOrder(it.n); }
+  else if(a==="ai"&&f) saveFile(it.n+".ai",new Blob([f.ai],{type:"application/postscript"}));
+  else if(a==="wmf"&&f) saveFile(it.n+".wmf",new Blob([f.wmf],{type:"image/wmf"}));
+  else if(a==="redo"){ it.status="new"; await qRunAll([it]); }
+  else if(a==="done"){ it.status= it.status==="done" ? (f&&f.ai?(it.note?"check":"ready"):"new") : "done"; }
+  else if(a==="del"){ Q.items=Q.items.filter(x=>x!==it); Q.files.delete(it.n); }
+  qSave(); qRender();
+}
+async function qFind(){
+  await apiReady; if(!apiOk){ qMsg("The queue needs the studio opened from Mat Studio (the hosted link or the launcher)."); return 0; }
+  const listed=($("qList").value.match(/\d{6,10}/g)||[]);
+  let found=0;
+  if(listed.length){ for(const n of listed){ if(!Q.items.some(i=>i.n===n)){ qItem(n); found++; } } $("qList").value=""; qMsg(found+" sketch number(s) added."); qSave(); qRender(); return found; }
+  const from=parseInt($("qFrom").value,10), count=+$("qCount").value;
+  if(!(from>0)){ qMsg("Type the number to scan from (the next sketch number you expect), or paste a list."); $("qFrom").focus(); return 0; }
+  qMsg("Looking at "+from+"–"+(from+count-1)+" on the portal…"); $("qFind").disabled=true;
+  try{ const r=await fetch(`api/scan?from=${from}&count=${count}`,{cache:"no-store"});
+    if(r.status===404){ qMsg("This launcher can't scan the portal. Paste the sketch numbers instead, or use the hosted link or the Python launcher."); return 0; }
+    const j=await r.json(); if(!r.ok) throw new Error(j.error||("HTTP "+r.status));
+    if(j.blocked){ qMsg("The portal blocked "+j.blocked+" of the look-ups (Cloudflare). Paste the sketch numbers instead."); }
+    let last=0; for(const x of j.results){ if(!x.ok) continue; last=Math.max(last,+x.n); if(!Q.items.some(i=>i.n===x.n)){ const it=qItem(x.n); it.name=x.name; if(!x.artwork) it.note="No artwork attached"; found++; } }
+    // next scan starts after the last order found; if nothing was found, keep the start so newer orders are not skipped
+    if(last) $("qFrom").value=String(last+1);
+    if(!j.blocked) qMsg(found? found+" new order(s) found. Press “Design all new”." : "No new orders between "+from+" and "+(from+count-1)+".");
+  }catch(e){ qMsg("Scan failed: "+e.message); }
+  finally{ $("qFind").disabled=Q.running; qSave(); qRender(); }
+  return found;
+}
+function qWait(ms){ return new Promise(r=>setTimeout(r,ms)); }
+async function qWaitDesigned(limit){ const t0=Date.now(); let ok=0;
+  while(Date.now()-t0<limit){ await qWait(300);
+    const done=S.srcName && $("busy").hidden && !S.tracing && (S.layers.length>0 || S.photo || S.plain);
+    ok= done? ok+1 : 0; if(ok>=3) return true; }
+  return false; }
+async function qDesign(it){
+  it.status="designing"; it.note=""; qRender();
+  S.layers=[]; S.srcName=""; S.plain=false;
+  const r=await fetch("api/page?n="+it.n,{cache:"no-store"});
+  if(!r.ok) throw new Error(r.status===403?"portal blocked the look-up":"portal error "+r.status);
+  const o=parseOrderHtml(await r.text(),it.n); it.name=o.name;
+  const notes=[];
+  await useOrder(o);
+  it.size=S.sizeMissing?"size missing":`${S.w} × ${S.h} cm`;
+  if(!o.artwork.length){ it.status="check"; it.note="No artwork attached: plain mat or add the logo by hand."; return; }
+  if(!(await qWaitDesigned(120000))) throw new Error("design took too long");
+  if(S.sizeMissing) notes.push("Size missing on the order: type it, then download.");
+  if(o.fieldsGuessed) notes.push("Some order fields were blank: check size and colours.");
+  if(o.special && !/^none\.?$/i.test(o.special.trim())) notes.push("Has special instructions: “"+o.special.slice(0,90)+(o.special.length>90?"…":"")+"”");
+  if(S.bgNote) notes.push(S.bgNote);
+  const L=layout(), px=Math.min(1.2, 420/Math.max(L.matW,L.matH)), c=document.createElement("canvas");
+  c.width=Math.max(1,Math.round(L.matW*px)); c.height=Math.max(1,Math.round(L.matH*px)); drawMat(c.getContext("2d"),px,0,0,"proof");
+  const f={thumb:c.toDataURL("image/png")};
+  if(!S.sizeMissing){ f.ai=buildPDF(); f.wmf=buildWMF(); }
+  Q.files.set(it.n,f); it.note=notes.join(" "); it.status=notes.length?"check":"ready";
+}
+async function qRunAll(list){
+  if(Q.running) return; Q.running=true; qRender();
+  const todo=(list||Q.items.filter(i=>i.status==="new"||i.status==="failed"));
+  let n=0; for(const it of todo){ n++; qMsg(`Designing ${it.n} (${n} of ${todo.length})…`);
+    try{ await qDesign(it); }catch(e){ it.status="failed"; it.note=e.message||String(e); }
+    qSave(); qRender(); }
+  Q.running=false; qRender();
+  const rd=Q.items.filter(i=>i.status==="ready").length, ck=Q.items.filter(i=>i.status==="check").length;
+  qMsg(todo.length? `Finished: ${rd} ready, ${ck} to check. Open each proof to review it before uploading.` : "Nothing new to design.");
+}
+$("qFind").onclick=qFind;
+$("qRun").onclick=()=>qRunAll();
+$("qZip").onclick=()=>{ const files=[]; for(const it of Q.items){ const f=Q.files.get(it.n); if(f&&f.ai&&it.status!=="done"){ files.push({name:it.n+".ai",data:f.ai},{name:it.n+".wmf",data:f.wmf}); } }
+  if(!files.length){ qMsg("No designed proofs to download yet."); return; } saveFile("mat-studio-queue.zip",zip(files)); };
+$("qAuto").onchange=e=>{ clearInterval(Q.timer); Q.timer=null; if(e.target.checked){ const tick=async()=>{ if(Q.running) return; if(await qFind()) await qRunAll(); }; Q.timer=setInterval(tick,10*60*1000); tick(); } };
+qLoad(); qRender(); if(Q.items.length) $("queue").open=true;
+
 $("bmCopy").onclick=()=>{ const code=bookmarkCode();
   navigator.clipboard.writeText(code).then(()=>toast("Bookmark copied. Now add it to the bookmarks bar (steps below)."),()=>{ const t=document.createElement("textarea"); t.value=code; document.body.appendChild(t); t.select(); try{ document.execCommand("copy"); toast("Bookmark copied. Now add it to the bookmarks bar (steps below)."); }catch(e){ toast("Copy failed: select the text in the box and press Ctrl+C."); } t.remove(); }); };
 try{ if(!window.name) window.name="matstudio"; }catch(e){}

@@ -24,6 +24,8 @@ import re
 import socketserver
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -265,6 +267,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send(200, page, ctype)
             except Exception as e:
                 return self.err(502, "Could not reach the design portal: " + str(e))
+        if u.path == "/api/scan":  # which of these design numbers are orders: for the queue
+            try:
+                start = int((q.get("from") or ["0"])[0])
+                count = max(1, min(60, int((q.get("count") or ["20"])[0])))
+                nums = [str(x) for x in range(start, start + count)]
+                extra = [x for x in (q.get("n") or [""])[0].split(",") if re.fullmatch(r"\d{4,10}", x)]
+                if extra:
+                    nums = extra[:60]
+            except ValueError:
+                return self.err(400, "from, count or n must be numbers.")
+            if not nums or not all(re.fullmatch(r"\d{4,10}", x) for x in nums):
+                return self.err(400, "Give a starting design number.")
+
+            def probe(n):
+                try:
+                    page, _, _ = fetch(PORTAL + ORDER_PATH + n, timeout=30)
+                    o = parse_order(page.decode("utf-8", "replace"), n)
+                    return {"n": n, "ok": True, "name": o["name"], "product": o["product"], "artwork": len(o["artwork"])}
+                except ValueError:
+                    return {"n": n, "ok": False}
+                except urllib.error.HTTPError as e:
+                    return {"n": n, "ok": False, "error": "HTTP %d" % e.code}
+                except Exception as e:
+                    return {"n": n, "ok": False, "error": str(e)[:120]}
+
+            with ThreadPoolExecutor(max_workers=6) as ex:
+                res = list(ex.map(probe, nums))
+            blocked = sum(1 for r in res if r.get("error", "").startswith("HTTP 403"))
+            return self.send(200, json.dumps({"results": res, "blocked": blocked}))
         if u.path == "/api/file":
             url = (q.get("u") or [""])[0]
             host = urllib.parse.urlparse(url).hostname or ""
