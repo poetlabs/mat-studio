@@ -28,6 +28,7 @@ body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:1
 header.top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-bottom:12px;border-bottom:2px solid var(--ink);margin-bottom:14px}
 header.top h1{font-family:var(--f-display);font-weight:700;font-size:30px;letter-spacing:.01em;margin:0;text-transform:uppercase;line-height:1}
 header.top h1 span{color:var(--accent)}
+header.top h1 .ver{font:500 12px var(--f-mono);color:var(--muted);text-transform:none;letter-spacing:0;vertical-align:middle}
 header.top p{margin:0;color:var(--muted);max-width:62ch}
 .app{display:grid;grid-template-columns:290px minmax(0,1fr) 330px;gap:14px;align-items:start}
 @media (max-width:1180px){.app{grid-template-columns:280px minmax(0,1fr)} .col-right{grid-column:1 / -1}}
@@ -130,7 +131,7 @@ details[open] summary{margin-bottom:10px}
 
 <div class="wrap">
 <header class="top">
-  <h1>Logo Mat <span>Proof Studio</span></h1>
+  <h1>Logo Mat <span>Proof Studio</span> <small class="ver" title="Studio version and build date">v29 · 10 Nov 2026</small></h1>
   <p>Drop the customer's logo, pick the mat style. It is redrawn as vectors, snapped to that style's yarn colours, placed on the mat, and packed as .ai + .wmf for upload.</p>
 </header>
 
