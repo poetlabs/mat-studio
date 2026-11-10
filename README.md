@@ -7,3 +7,7 @@ Runs the Logo Mat Proof Studio as a web service: open the link, type a sketch nu
 - `render.yaml`: Render settings (free web service, start command, health check).
 
 Set `MATSTUDIO_KEY` in Render (Environment) to a password. The browser asks for it once (any user name, that password).
+
+## Chrome extension
+
+`extension/` is the same studio as a Chrome extension. It runs in the designer's own Chrome, so it reads the portal's design queue with their log-in, designs each sketch and saves the .ai / .wmf files to Downloads/MatStudio. Install: chrome://extensions, Developer mode on, Load unpacked, pick the `extension` folder. See `extension/INSTALL.txt`.

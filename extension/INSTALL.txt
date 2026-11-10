@@ -1,0 +1,19 @@
+Logo Mat Studio - Chrome extension
+
+Install (once per computer, about one minute):
+1. Unzip this file. Keep the "MatStudio-extension" folder somewhere permanent (for example Documents). Chrome loads it from there.
+2. In Chrome, open chrome://extensions
+3. Turn on "Developer mode" (top right).
+4. Click "Load unpacked" and choose the MatStudio-extension folder.
+5. Pin it: click the puzzle icon in the toolbar, then the pin next to Logo Mat Studio.
+
+Use:
+- Log in to the design portal in Chrome as usual.
+- Click the Logo Mat Studio icon: the studio opens, reads your design queue and designs every new sketch.
+- Or on the portal's queue page click "Design all in Mat Studio" (bottom right), or "Mat Studio" next to any sketch.
+- On an order page, "Design in Mat Studio" opens just that order.
+- Each sketch gets a card: READY or CHECK (with the reason). Open checks the design in the studio; .ai / .wmf save the files.
+- "Download all ready" saves every ready design to Downloads\MatStudio (1234567.ai, 1234567.wmf), no zip.
+- The number on the icon is how many sketches in the queue are not designed yet (checked every 15 minutes).
+
+Update: replace the folder's contents with the new version, then click the reload arrow on the extension in chrome://extensions.

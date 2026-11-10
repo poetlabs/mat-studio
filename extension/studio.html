@@ -1,0 +1,288 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Logo Mat Proof Studio</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a production docket — work order on the left, the mat on a lit table in the middle, yarn map and exports on the right. */
+:root{
+  --bg:#E8EBE7; --panel:#F8F9F6; --line:#D2D8D1; --ink:#1B2220; --muted:#5A6560;
+  --accent:#17646C; --accent-ink:#FFFFFF; --stage:#CBD2CB; --field:#FFFFFF;
+  --good:#2E7D4F; --warn:#A86A12; --bad:#B42318;
+  --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#111513; --panel:#191E1C; --line:#2B3330; --ink:#E2E7E4; --muted:#93A09A;
+  --accent:#5DB8C1; --accent-ink:#0A1A1C; --stage:#0B0E0D; --field:#111513;
+  --good:#5CC48A; --warn:#E3AB4E; --bad:#F2796D; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#111513; --panel:#191E1C; --line:#2B3330; --ink:#E2E7E4; --muted:#93A09A;
+  --accent:#5DB8C1; --accent-ink:#0A1A1C; --stage:#0B0E0D; --field:#111513;
+  --good:#5CC48A; --warn:#E3AB4E; --bad:#F2796D; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.45}
+.wrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:14px 28px;max-width:1680px;margin:0 auto}
+header.top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-bottom:12px;border-bottom:2px solid var(--ink);margin-bottom:14px}
+header.top h1{font-family:var(--f-display);font-weight:700;font-size:30px;letter-spacing:.01em;margin:0;text-transform:uppercase;line-height:1}
+header.top h1 span{color:var(--accent)}
+header.top p{margin:0;color:var(--muted);max-width:62ch}
+.app{display:grid;grid-template-columns:290px minmax(0,1fr) 330px;gap:14px;align-items:start}
+@media (max-width:1180px){.app{grid-template-columns:280px minmax(0,1fr)} .col-right{grid-column:1 / -1}}
+@media (max-width:760px){.app{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+h2{font-family:var(--f-display);font-weight:600;font-size:15px;letter-spacing:.12em;text-transform:uppercase;margin:0;color:var(--muted);display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+h2 b{font-family:var(--f-mono);font-weight:500;font-size:12px;letter-spacing:0;color:var(--ink);text-transform:none}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:500;min-width:0}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+textarea{font:inherit;font-size:12px;font-family:var(--f-mono);color:var(--ink);background:var(--field);border:1px solid var(--line);border-radius:4px;padding:7px 8px;width:100%;resize:vertical}
+input[type=text],input[type=number],select{font:inherit;font-size:14px;color:var(--ink);background:var(--field);border:1px solid var(--line);border-radius:4px;padding:7px 8px;width:100%;min-width:0}
+input:focus-visible,select:focus-visible,button:focus-visible,.drop:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+input.mono{font-family:var(--f-mono)}
+.yarnpick{display:grid;grid-template-columns:26px minmax(0,1fr);gap:6px;align-items:center}
+.chip{width:26px;height:26px;border-radius:4px;border:1px solid var(--line);box-shadow:inset 0 0 0 1px rgba(0,0,0,.08)}
+.drop{border:1.5px dashed var(--line);border-radius:6px;padding:12px;display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;align-items:center;cursor:pointer;background:var(--field)}
+.drop.over{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--field))}
+.drop .thumb{width:72px;height:72px;border-radius:4px;background:repeating-conic-gradient(var(--line) 0 25%,transparent 0 50%) 0 0/12px 12px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.drop .thumb img{max-width:100%;max-height:100%}
+.drop strong{display:block;font-size:13px}
+.drop span{font-size:12px;color:var(--muted);word-break:break-word}
+.hint{font-size:12px;color:var(--muted);margin:0}
+.srcTools{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
+label.check{display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer}
+label.check input{margin-top:3px;accent-color:var(--accent)}
+#bPlain{align-self:flex-start}
+.photoNote{font-size:13px;color:var(--muted);padding:8px 0}
+.srcTools .f{flex:0 0 auto}
+.btn.small{font-size:13px;padding:7px 10px;font-weight:500}
+.cropBox{display:flex;flex-direction:column;gap:8px}
+.cropBox canvas{width:100%;border-radius:4px;cursor:crosshair;touch-action:none;background:repeating-conic-gradient(var(--line) 0 25%,transparent 0 50%) 0 0/12px 12px}
+.btns2{display:flex;gap:8px;flex-wrap:wrap}
+
+.stagebar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.seg button{font:inherit;font-size:13px;font-weight:500;border:0;background:var(--field);color:var(--muted);padding:6px 12px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--panel)}
+.stage{background:var(--stage);border-radius:6px;position:relative;min-height:260px;overflow:hidden}
+.stage canvas{display:block;width:100%}
+.busy{position:absolute;inset:auto 10px 10px auto;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:5px 9px;font-family:var(--f-mono);font-size:12px}
+.stats{font-family:var(--f-mono);font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 16px;font-variant-numeric:tabular-nums}
+.stats b{color:var(--ink);font-weight:500}
+.sliders{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media (max-width:560px){.sliders{grid-template-columns:minmax(0,1fr)}}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.rl{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);font-weight:500}
+.rl output{font-family:var(--f-mono);color:var(--ink)}
+
+.ymap{display:flex;flex-direction:column;gap:8px}
+.yrow{display:grid;grid-template-columns:22px 12px 26px minmax(0,1fr);gap:6px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:5px;background:var(--field)}
+.yrow.isbg{opacity:.62}
+.yrow .orig{width:22px;height:22px;border-radius:50%;border:1px solid var(--line)}
+.yrow .arrow{color:var(--muted);font-size:12px;text-align:center}
+.yrow .meta{grid-column:1 / -1;display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.yrow .meta label{display:flex;gap:6px;align-items:center;cursor:pointer}
+.de{font-family:var(--f-mono);font-size:11px;padding:1px 6px;border-radius:3px;border:1px solid currentColor;white-space:nowrap}
+.de.set{color:var(--accent)} .de.good{color:var(--good)} .de.ok{color:var(--warn)} .de.far{color:var(--bad)}
+.empty{font-size:13px;color:var(--muted);padding:8px 0}
+.btn{font:inherit;font-weight:600;font-size:14px;border-radius:5px;padding:10px 12px;cursor:pointer;border:1px solid var(--line);background:var(--field);color:var(--ink)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+input.need{outline:2px solid #d33;outline-offset:1px;background:color-mix(in srgb,#d33 12%,var(--field))}
+.lookup{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.lookup .lk{display:flex;gap:8px}.bm summary{font-size:13px;cursor:pointer;color:var(--muted)}.bm{display:flex;flex-direction:column;gap:6px}.bm .btn{align-self:flex-start}.bmSteps{margin:0;padding-left:18px}.lookup .lk input{flex:1;min-width:0}
+.ordercard{border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:13px;display:flex;flex-direction:column;gap:8px}
+.ordercard[hidden]{display:none}.ordercard h3{margin:0;font-size:15px}.ordercard .sub{color:var(--muted)}
+.ordercard dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0}.ordercard dt{color:var(--muted)}.ordercard dd{margin:0;overflow-wrap:anywhere}
+.ordercard .sp{background:color-mix(in srgb,var(--accent) 10%,transparent);border-radius:4px;padding:6px 8px;white-space:pre-wrap}
+.ordercard .art{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.ordercard .art span{flex:1;min-width:0;overflow-wrap:anywhere}
+.ordercard a{color:var(--accent)}
+.btns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.btns .btn{font-size:13px;padding:8px 6px}
+.spec{font-family:var(--f-mono);font-size:12px;background:var(--field);border:1px solid var(--line);border-radius:5px;padding:10px;white-space:pre-wrap;margin:0;max-height:220px;overflow:auto}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--panel);padding:9px 14px;border-radius:5px;font-size:13px;max-width:calc(100% - 32px)}
+details summary{cursor:pointer;font-size:12px;color:var(--muted);font-weight:500}
+details[open] summary{margin-bottom:10px}
+.sample-tag{font-family:var(--f-mono);font-size:11px;color:var(--warn);border:1px solid currentColor;border-radius:3px;padding:0 5px;margin-left:6px}
+.queue{margin-bottom:14px}
+.queue>summary{font-family:var(--f-display);font-size:15px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;color:var(--muted)}
+.qbar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.qbar .f{min-width:0}
+.qbar textarea{font:13px var(--f-mono);width:min(320px,100%);height:38px;resize:vertical;background:var(--field);color:var(--ink);border:1px solid var(--line);border-radius:5px;padding:8px}
+.qbar input[type=text]{width:120px}
+.qgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-top:12px}
+.qcard{border:1px solid var(--line);border-radius:6px;background:var(--field);padding:8px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.qcard .qimg{aspect-ratio:16/10;background:var(--stage);border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:12px;color:var(--muted)}
+.qcard .qimg img{max-width:100%;max-height:100%}
+.qcard h4{margin:0;font:600 14px var(--f-body);display:flex;justify-content:space-between;gap:6px}
+.qcard h4 span{font:12px var(--f-mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qcard .qnote{font-size:12px;color:var(--muted);min-height:16px}
+.qcard .qbtns{display:flex;flex-wrap:wrap;gap:6px}
+.qcard .qbtns .btn{padding:5px 8px;font-size:12px}
+.qcard .qbtns a.btn{text-decoration:none;display:inline-flex;align-items:center}
+.qst{font:600 11px var(--f-mono);text-transform:uppercase;letter-spacing:.06em;padding:1px 6px;border-radius:3px;border:1px solid currentColor}
+.qst.ready{color:var(--good)} .qst.check{color:var(--warn)} .qst.failed{color:var(--bad)} .qst.new,.qst.designing{color:var(--muted)} .qst.done{color:var(--accent)}
+.qcard.isdone{opacity:.6}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <h1>Logo Mat <span>Proof Studio</span></h1>
+  <p>Drop the customer's logo, pick the mat style. It is redrawn as vectors, snapped to that style's yarn colours, placed on the mat, and packed as .ai + .wmf for upload.</p>
+</header>
+
+<details class="panel queue" id="queue">
+  <summary>Order queue: design several sketches at once</summary>
+  <div class="qbar">
+    <label class="f">Sketch numbers (paste, one per line)<textarea id="qList" class="mono" placeholder="5156381&#10;5156405"></textarea></label>
+    <span class="hint" style="padding-bottom:10px">or</span>
+    <label class="f">Scan from number<input type="text" id="qFrom" class="mono" inputmode="numeric" placeholder="e.g. 5156775"></label>
+    <label class="f">Look at<select id="qCount"><option value="20">next 20</option><option value="40">next 40</option><option value="60">next 60</option></select></label>
+    <button type="button" class="btn" id="qFind">Find orders</button>
+    <button type="button" class="btn primary" id="qRun">Design all new</button>
+    <button type="button" class="btn" id="qZip">Download ready (.zip)</button>
+  </div>
+  <label class="check"><input type="checkbox" id="qAuto"> Every 10 minutes while this page is open: look for new orders and design them</label>
+  <p class="hint" id="qMsg">Quickest: open the portal's design queue and click the “Send to Mat Studio” bookmark there; every sketch in it is added and designed. Designs are proposals: open each one to check it before uploading.</p>
+  <div class="qgrid" id="qGrid"></div>
+</details>
+<div class="app">
+  <!-- WORK ORDER -->
+  <div class="col">
+    <section class="panel" aria-labelledby="h-order">
+      <h2 id="h-order">Work order</h2>
+      <form id="lookup" class="lookup" autocomplete="off">
+        <label class="f" for="lookupNo">Sketch / design number</label>
+        <div class="lk"><input type="text" id="lookupNo" class="mono" inputmode="numeric" placeholder="e.g. 5128435" aria-label="Sketch or design number"><button type="submit" class="btn primary" id="bGo">Go</button></div>
+        <p class="hint" id="lookupMsg" hidden></p>
+        <details id="bmBox" class="bm"><summary>One-time setup: the portal bookmark</summary>
+          <p class="hint">Sends the portal's design queue (or one order) to this studio. Add it once (copy it again if you added an older version):</p>
+          <button type="button" class="btn small" id="bmCopy">1. Copy bookmark</button>
+          <ol class="hint bmSteps">
+            <li>Press <b>Ctrl+Shift+B</b> to show the bookmarks bar.</li>
+            <li>Right-click the bar, choose <b>Add page…</b> (Edge: <b>Add favourite</b>).</li>
+            <li>Name: <b>Send to Mat Studio</b>. URL: delete what is there and press <b>Ctrl+V</b>. Save.</li>
+          </ol>
+          <p class="hint">Then click the bookmark on the portal's <b>design queue</b> page: every sketch is added to the order queue here and designed. On a single order page it opens that order here.</p>
+        </details>
+      </form>
+      <div id="orderCard" class="ordercard" hidden></div>
+      <details id="pasteBox">
+        <summary>Paste from order page</summary>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <textarea id="orderText" rows="6" placeholder="On the NEW Design Instructions page, select the order details (Ctrl+A), copy, and paste here." aria-label="Order page text"></textarea>
+          <button type="button" class="btn" id="bFill">Fill work order</button>
+          <p class="hint" id="fillResult" hidden></p>
+        </div>
+      </details>
+      <label class="f">Design ID <input type="text" id="designId" class="mono" value="5069241" autocomplete="off"></label>
+      <label class="f">Style <select id="style"></select></label>
+      <label class="f">Size preset <select id="preset"></select></label>
+      <div class="row2">
+        <label class="f">Width cm <input type="number" id="matW" min="30" max="600" step="any" value="200"></label>
+        <label class="f">Height cm <input type="number" id="matH" min="30" max="600" step="any" value="115"></label>
+      </div>
+      <label class="f">Mat shape <select id="corner"><option value="square">Rectangle, square corners</option><option value="rounded">Rectangle, rounded corners</option><option value="oval">Oval</option><option value="circle">Circle</option><option value="arch">Arch (half-round top)</option></select></label>
+      <label class="f">Background colour
+        <span class="yarnpick"><span class="chip" id="bgChip"></span><select id="bgYarn"></select></span>
+      </label>
+      <label class="f">Logo colour
+        <span class="yarnpick"><span class="chip" id="logoChip"></span><select id="logoYarn"></select></span>
+      </label>
+      <label class="f">Border
+        <span class="yarnpick"><span class="chip" id="borderChip"></span><select id="borderYarn"></select></span>
+      </label>
+      <label class="f" id="borderWWrap" hidden>Border width cm <input type="number" id="borderW" min="1" max="30" step="0.5" value="5"></label>
+    </section>
+
+    <section class="panel" aria-labelledby="h-logo">
+      <h2 id="h-logo">Customer logo</h2>
+      <div class="drop" id="drop" tabindex="0" role="button" aria-label="Upload logo image">
+        <div class="thumb"><img id="thumb" alt=""></div>
+        <div><strong id="srcName">Drop, paste or choose an image</strong><span id="srcInfo">PNG, JPG, WebP or SVG. Low-res is fine.</span></div>
+      </div>
+      <input type="file" id="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif,image/bmp,application/pdf,.pdf,.ai,.svg" hidden>
+      <label class="check"><input type="checkbox" id="cleanupMode"> Clean up a photo or scan (keep only the logo shapes)</label>
+      <label class="check"><input type="checkbox" id="photoMode"> Keep as a photo (print the image as it is, no tracing)</label>
+      <button type="button" class="btn small" id="bPlain">Plain mat, no logo</button>
+      <div class="srcTools" id="srcTools" hidden>
+        <label class="f" id="pageWrap" hidden>Page <select id="pdfPage"></select></label>
+        <button type="button" class="btn small" id="bCrop">Select part of the artwork</button>
+      </div>
+      <div class="cropBox" id="cropBox" hidden>
+        <p class="hint">Drag over the part to use, for example the logo on a spec sheet.</p>
+        <canvas id="cropCv"></canvas>
+        <div class="btns2"><button type="button" class="btn primary small" id="bCropUse" disabled>Use selection</button><button type="button" class="btn small" id="bCropAll">Use whole artwork</button><button type="button" class="btn small" id="bCropCancel">Cancel</button></div>
+      </div>
+      <p class="hint">Accepts images, PDF, Illustrator (.ai saved with PDF compatibility) and SVG. Tip: copy the logo from the order page and press Ctrl+V here.</p>
+    </section>
+  </div>
+
+  <!-- STAGE -->
+  <div class="col">
+    <section class="panel" aria-labelledby="h-stage">
+      <div class="stagebar">
+        <h2 id="h-stage">Mat <b id="stageTitle"></b></h2>
+        <div class="seg" role="group" aria-label="View">
+          <button type="button" id="vMock" aria-pressed="true">Mockup</button>
+          <button type="button" id="vProof" aria-pressed="false">Production proof</button>
+        </div>
+      </div>
+      <div class="stage" id="stage"><canvas id="cv"></canvas><div class="busy" id="busy" hidden></div></div>
+      <div class="stats" id="stats"></div>
+      <div class="sliders">
+        <div><div class="rl"><span>Logo size</span><output id="oScale">95%</output></div><input type="range" id="scale" min="20" max="100" value="95" aria-label="Logo size"></div>
+        <div><div class="rl"><span>Move left / right</span><output id="oDx">0</output></div><input type="range" id="dx" min="-40" max="40" value="0" step="0.5" aria-label="Move logo horizontally"></div>
+        <div><div class="rl"><span>Move up / down</span><output id="oDy">0</output></div><input type="range" id="dy" min="-40" max="40" value="0" step="0.5" aria-label="Move logo vertically"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- YARN MAP + EXPORT -->
+  <div class="col col-right">
+    <section class="panel" aria-labelledby="h-yarn">
+      <h2 id="h-yarn">Yarn map <b id="yarnCount"></b></h2>
+      <div class="ymap" id="ymap"><div class="empty">Colours found in the logo appear here once it is loaded.</div></div>
+      <details>
+        <summary>Tracing settings</summary>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <label class="f">Colours to detect <select id="kSel"><option value="auto">Auto</option></select></label>
+          <div><div class="rl"><span>Edge smoothing</span><output id="oSmooth">2</output></div><input type="range" id="smooth" min="0" max="4" value="2" aria-label="Edge smoothing"></div>
+          <label class="f">Smallest detail to keep (mm) <input type="number" id="minDetail" min="0" max="30" step="0.5" value="3"></label>
+          <label class="f">Round corners (mm, 0 = keep sharp) <input type="number" id="roundMM" min="0" max="20" step="0.5" value="2"></label>
+          <label class="f">Layer build
+            <select id="build"><option value="stacked">Stacked (no gaps between colours)</option><option value="cut">Cut (no overlaps)</option></select>
+          </label>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel" aria-labelledby="h-export">
+      <h2 id="h-export">Export</h2>
+      <button type="button" class="btn primary" id="bZip">Download production pack (.zip)</button>
+      <p class="hint" style="margin-top:-4px">Contains <span id="packNames">.ai, .wmf</span>, an SVG, a mockup PNG and the colour spec.</p>
+      <div class="btns">
+        <button type="button" class="btn" id="bSvg">SVG</button>
+        <button type="button" class="btn" id="bPdf">PDF</button>
+        <button type="button" class="btn" id="bPng">Mockup PNG</button>
+      </div>
+      <div class="btns" id="aiBtns" hidden>
+        <button type="button" class="btn" id="bAi">Download .ai</button>
+        <button type="button" class="btn" id="bWmf">Download .wmf</button>
+      </div>
+      <h2>Colour spec</h2>
+      <pre class="spec" id="spec"></pre>
+      <button type="button" class="btn" id="bCopy">Copy colour spec</button>
+    </section>
+  </div>
+</div>
+</div>
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script src="shim.js"></script><script src="studio.js"></script>

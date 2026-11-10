@@ -121,6 +121,7 @@ details[open] summary{margin-bottom:10px}
 .qcard .qnote{font-size:12px;color:var(--muted);min-height:16px}
 .qcard .qbtns{display:flex;flex-wrap:wrap;gap:6px}
 .qcard .qbtns .btn{padding:5px 8px;font-size:12px}
+.qcard .qbtns a.btn{text-decoration:none;display:inline-flex;align-items:center}
 .qst{font:600 11px var(--f-mono);text-transform:uppercase;letter-spacing:.06em;padding:1px 6px;border-radius:3px;border:1px solid currentColor}
 .qst.ready{color:var(--good)} .qst.check{color:var(--warn)} .qst.failed{color:var(--bad)} .qst.new,.qst.designing{color:var(--muted)} .qst.done{color:var(--accent)}
 .qcard.isdone{opacity:.6}
@@ -1811,7 +1812,7 @@ function applyLogoYarn(){ const p=pal();
 /* ---------- image intake ---------- */
 const WORK_LONG=2000;
 /* ---------- vector artwork: PDF / Illustrator (.ai with PDF compatibility) / SVG ---------- */
-const PDFJS_BASE="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+const PDFJS_BASE=window.MATSTUDIO_PDFJS||"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/"; // the Chrome extension ships its own copy
 let pdfjsReady=null;
 function loadScript(src){ return new Promise((res,rej)=>{ const el=document.createElement("script"); el.src=src; el.onload=res; el.onerror=()=>rej(new Error("load")); document.head.appendChild(el); }); }
 function getPdfjs(){
@@ -2426,7 +2427,7 @@ function renderYarnMap(){
 let worker=null;
 function getWorker(){
   if(worker) return worker;
-  const src=$("tracerSrc").textContent + "\n" + $("fitSrc").textContent + `
+  const src=window.MATSTUDIO_WORKER? "" : $("tracerSrc").textContent + "\n" + $("fitSrc").textContent + `
   self.onmessage=function(e){ var m=e.data, T=self.ImageTracer, w=m.w, h=m.h, out=[];
     var o=T.checkoptions(m.opts);
     function fitLayer(ins){ return ins.map(function(p){ var pts=p.points.map(function(q){ return {x:q.x,y:q.y}; });
@@ -2437,7 +2438,7 @@ function getWorker(){
       out.push(fitLayer(T.internodes(T.pathscan(T.layeringstep(ii,1),o.pathomit),o)));
       self.postMessage({job:m.job,progress:L+1,of:m.masks.length}); }
     self.postMessage({job:m.job,layers:out}); };`;
-  worker=new Worker(URL.createObjectURL(new Blob([src],{type:"text/javascript"})));
+  worker= window.MATSTUDIO_WORKER ? new Worker(window.MATSTUDIO_WORKER) : new Worker(URL.createObjectURL(new Blob([src],{type:"text/javascript"})));
   worker.onmessage=onTrace; worker.onerror=e=>{ busy(null); toast("Tracing failed: "+(e.message||"worker error")); };
   return worker;
 }
@@ -2848,9 +2849,9 @@ $("bAi").onclick=()=>{ if(needLogo())return; saveFile(fname(".ai"),new Blob([bui
 $("bWmf").onclick=()=>{ if(needLogo())return; saveFile(fname(".wmf"),new Blob([buildWMF()],{type:"image/wmf"})); };
 
 /* ---------- order lookup by design number (needs the Mat Studio launcher, which can read the portal) ---------- */
-let apiOk=null, apiPortal=null;
-const apiReady=(location.protocol==="http:"||location.protocol==="https:")
-  ? fetch("api/ping",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>{ apiOk=!!(j&&j.ok); apiPortal=j&&j.portal||null; if(apiOk) $("aiBtns").hidden=false; return apiOk; }).catch(()=>{ apiOk=false; return false; })
+let apiOk=null, apiPortal=null, apiExt=false;
+const apiReady=(location.protocol==="http:"||location.protocol==="https:"||location.protocol==="chrome-extension:")
+  ? fetch("api/ping",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>{ apiOk=!!(j&&j.ok); apiPortal=j&&j.portal||null; apiExt=!!(j&&j.ext); if(apiExt){ $("bmBox").hidden=true; $("qFind").textContent="Read portal queue"; $("qZip").textContent="Download all ready"; } if(apiOk) $("aiBtns").hidden=false; return apiOk; }).catch(()=>{ apiOk=false; return false; })
   : Promise.resolve(apiOk=false);
 const esc=t=>String(t==null?"":t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
 function lookupMsg(t){ const m=$("lookupMsg"); m.hidden=!t; m.textContent=t||""; }
@@ -2955,6 +2956,7 @@ function bookmarkCode(){
 }
 async function readHash(){
   const h=location.hash;
+  if(h==="#autoqueue"){ history.replaceState(null,"",location.pathname+location.search); await apiReady; $("queue").open=true; await qFind(); if(Q.items.some(i=>i.status==="new")) await qRunAll(); return; }
   if(h.startsWith("#queue=")){ history.replaceState(null,"",location.pathname+location.search);
     try{ localStorage.setItem("matstudio.bm","1"); }catch(e){}
     let rows=[]; try{ rows=JSON.parse(decodeURIComponent(h.slice(7))); }catch(e){ return; }
@@ -2998,7 +3000,12 @@ async function qAction(it,a){
   qSave(); qRender();
 }
 async function qFind(){
-  await apiReady; if(!apiOk){ qMsg("The queue needs the studio opened from Mat Studio (the hosted link or the launcher)."); return 0; }
+  await apiReady;
+  if(apiExt && !$("qList").value.trim()){ qMsg("Reading the portal's design queue…");
+    try{ const r=await fetch("api/queue",{cache:"no-store"}); const j=await r.json(); if(!r.ok) throw new Error(j.error||("HTTP "+r.status));
+      const before=Q.items.length; qFromPortal(j.rows, true); return Q.items.length-before; }
+    catch(e){ qMsg(e.message); return 0; } }
+  if(!apiOk){ qMsg("The queue needs the studio opened from Mat Studio (the hosted link or the launcher)."); return 0; }
   const listed=($("qList").value.match(/\d{6,10}/g)||[]);
   let found=0;
   if(listed.length){ for(const n of listed){ if(!Q.items.some(i=>i.n===n)){ qItem(n); found++; } } $("qList").value=""; qMsg(found+" sketch number(s) added."); qSave(); qRender(); return found; }
@@ -3043,6 +3050,7 @@ async function qDesign(it){
   const f={thumb:c.toDataURL("image/png")};
   if(!S.sizeMissing){ f.ai=buildPDF(); f.wmf=buildWMF(); }
   Q.files.set(it.n,f); it.note=notes.join(" "); it.status=notes.length?"check":"ready";
+  if(window.matstudioSeen) window.matstudioSeen(it.n);
 }
 async function qRunAll(list){
   if(Q.running) return; Q.running=true; qRender();
@@ -3055,20 +3063,22 @@ async function qRunAll(list){
   qMsg(todo.length? `Finished: ${rd} ready, ${ck} to check. Open each proof to review it before uploading.` : "Nothing new to design.");
 }
 /* The portal's design queue (behind its log-in) arrives from the bookmark: add new sketches, retire ones that left the queue, design the new ones. */
-function qFromPortal(rows){
+function qFromPortal(rows,noRun){
   const nums=new Set(); let added=0;
   for(const [n,name,style,date,div] of rows){ if(!/^\d{4,10}$/.test(n)) continue; nums.add(n);
     let it=Q.items.find(i=>i.n===n); if(!it){ it=qItem(n); added++; } Object.assign(it,{name:it.name||name, style, date, division:div, fromQueue:true}); }
   let gone=0; for(const it of Q.items) if(it.fromQueue && !nums.has(it.n) && it.status!=="done" && it.status!=="designing"){ it.status="done"; it.note="No longer in the portal queue (uploaded)."; gone++; }
   $("queue").open=true; qSave(); qRender(); window.scrollTo({top:0,behavior:"smooth"});
-  qMsg(`${nums.size} sketches in the portal queue: ${added} new${gone?", "+gone+" left the queue":""}.`+(added?" Designing the new ones…":""));
-  if(added) qRunAll();
+  qMsg(`${nums.size} sketches in the portal queue: ${added} new${gone?", "+gone+" left the queue":""}.`+(added&&!noRun?" Designing the new ones…":""));
+  if(added && !noRun) qRunAll();
 }
 $("qFind").onclick=qFind;
 $("qRun").onclick=()=>qRunAll();
-$("qZip").onclick=()=>{ const files=[]; for(const it of Q.items){ const f=Q.files.get(it.n); if(f&&f.ai&&it.status!=="done"){ files.push({name:it.n+".ai",data:f.ai},{name:it.n+".wmf",data:f.wmf}); } }
+$("qZip").onclick=async()=>{ if(apiExt){ let k=0; for(const it of Q.items){ const f=Q.files.get(it.n); if(f&&f.ai&&it.status!=="done"&&!f.saved){ await saveFile(it.n+".ai",new Blob([f.ai])); await saveFile(it.n+".wmf",new Blob([f.wmf])); f.saved=true; k++; } }
+    qMsg(k? k+" design(s) saved to Downloads/MatStudio." : "Nothing new to download."); return; }
+  const files=[]; for(const it of Q.items){ const f=Q.files.get(it.n); if(f&&f.ai&&it.status!=="done"){ files.push({name:it.n+".ai",data:f.ai},{name:it.n+".wmf",data:f.wmf}); } }
   if(!files.length){ qMsg("No designed proofs to download yet."); return; } saveFile("mat-studio-queue.zip",zip(files)); };
-$("qAuto").onchange=e=>{ clearInterval(Q.timer); Q.timer=null; if(e.target.checked){ const tick=async()=>{ if(Q.running) return; if(await qFind()) await qRunAll(); }; Q.timer=setInterval(tick,10*60*1000); tick(); } };
+$("qAuto").onchange=e=>{ clearInterval(Q.timer); Q.timer=null; if(e.target.checked){ const tick=async()=>{ if(Q.running) return; await qFind(); if(Q.items.some(i=>i.status==="new")) await qRunAll(); }; Q.timer=setInterval(tick,10*60*1000); tick(); } };
 qLoad(); qRender(); if(Q.items.length) $("queue").open=true;
 
 $("bmCopy").onclick=()=>{ const code=bookmarkCode();
