@@ -131,7 +131,7 @@ details[open] summary{margin-bottom:10px}
 
 <div class="wrap">
 <header class="top">
-  <h1>Logo Mat <span>Proof Studio</span> <small class="ver" title="Studio version and build date">v29 · 10 Nov 2026</small></h1>
+  <h1>Logo Mat <span>Proof Studio</span> <small class="ver" title="Studio version and build date">v30 · 12 Nov 2026</small></h1>
   <p>Drop the customer's logo, pick the mat style. It is redrawn as vectors, snapped to that style's yarn colours, placed on the mat, and packed as .ai + .wmf for upload.</p>
 </header>
 
@@ -1992,7 +1992,7 @@ function analyze(){
   { let far=0,n=0; for(let i=0;i<Math.min(nFlat,samples.length);i++){ if(sNear[i]===bgC && !sFar[i]) continue; n++; far+=sFar[i]; } S.resid=n>30? far/n : 0; } // measured on the logo, not the backdrop
   // Photos and textured scans (a photo of an old mat, a painted sign): keep only the logo strokes, like a designer redrawing them.
   S.noise=speckRate(idx,w,h);
-  const photoWanted=!S.photoUser && (S.photoReq || (STYLES[S.style].print && S.resid>PHOTO_RESID));
+  const photoWanted=!S.photoUser && (S.photoReq || autoPhoto());
   S.cleanup= S.cleanupUser!=null? S.cleanupUser : (!photoWanted && S.noise>CLEANUP_NOISE);
   S.cleanupInfo=null; S.cleanupConf=null;
   if(S.cleanup){ const cu=cleanupStrokes(c,w,h,idx,cents);
@@ -2056,12 +2056,15 @@ function analyze(){
   S.idx=idx; S.work={w,h}; S.trN=trN;
   // Printed styles (Classic Impression) keep photographic artwork as an image, like the designers do;
   // a plain backdrop is cut away, a full picture (sky, scene) fills the whole mat.
-  if(!S.photoUser){ const ph=!S.cleanup && (S.photoReq || (STYLES[S.style].print && S.resid>PHOTO_RESID));
+  if(!S.photoUser){ const ph=!S.cleanup && (S.photoReq || autoPhoto());
     S.photo=ph; const cb=$("photoMode"); if(cb) cb.checked=ph; }
   S.photoFit= bgC>=0 && S.bgFlat>0.7 ? "cut" : "bleed";
   contrastSwap(); computeBBox(); renderYarnMap(); retrace();
 }
 const PHOTO_RESID=0.42;
+// A printed style keeps photographic artwork as a photo, unless the order names logo yarns: then it is a logo to redraw
+// in those yarns, however soft the file is (Ferryman 5158667 came out as a cropped photo).
+function autoPhoto(){ return STYLES[S.style].print && S.resid>PHOTO_RESID && !S.orderLogo; }
 /* Order logo colours that include the mat colour plus one more (MTL: mat C45, logo "C45 + C47"), on artwork that sits on a
    backdrop of that other colour: designers keep the backdrop as an inner panel in it and draw the logo in the mat colour. */
 function decidePanel(){ S.innerPanel=null; const p=pal();
@@ -2549,7 +2552,7 @@ function flattenContour(ct,map,step){
 /* ---------- layout (all in mm) ---------- */
 function layout(){
   const matW=S.w*10, matH=S.h*10, bw=S.border!=="none"? S.borderW*10 : 0, edge=S.edgeCm? S.edgeCm*10 : null;
-  let margin= edge!=null && !S.innerPanel ? edge : Math.min(matW,matH)*0.07, panel=null, off=bw;
+  let margin= edge!=null && !S.innerPanel ? edge : Math.min(matW,matH)*(S.fill?0.03:0.07), panel=null, off=bw;
   if(S.innerPanel && !S.plain){ const e=edge!=null? edge : Math.min(matW,matH)*0.1; panel={x:bw+e,y:bw+e,w:matW-2*(bw+e),h:matH-2*(bw+e),yarn:S.innerPanel}; off=bw+e; margin=Math.min(panel.w,panel.h)*0.12; }
   const bb=S.bbox||{x:0,y:0,w:1,h:1}, a=bb.w/bb.h;
   let aw=matW-2*(off+margin), ah=matH-2*(off+margin), ccy=matH/2;
@@ -2558,7 +2561,7 @@ function layout(){
     const v=1/Math.sqrt(a*a/(rx*rx)+1/(ry*ry)); aw=2*a*v*0.88; ah=2*v*0.88; }
   else if(S.corner==="arch"){ // box standing on the flat bottom, under the half-ellipse
     const rx=matW/2-bw, ry=matH-2*bw, t=1/Math.sqrt(a*a/(4*rx*rx)+1/(ry*ry)); aw=a*t*0.82; ah=t*0.82; ccy=matH-bw-t*0.5; }
-  let k=Math.max(1e-6,Math.min(aw/bb.w, ah/bb.h))*S.scale;
+  let k=Math.max(1e-6,Math.min(aw/bb.w, ah/bb.h))*(S.fill?Math.max(S.scale,1):S.scale);
   let cx=matW/2+S.dx/100*matW, cy=ccy+S.dy/100*matH;
   if(S.corner==="square"||S.corner==="rounded"){ const lw=bb.w*k, lh=bb.h*k, m0=off+margin;
     if(S.alignX==="left") cx=m0+lw/2+S.dx/100*matW; else if(S.alignX==="right") cx=matW-m0-lw/2+S.dx/100*matW;
@@ -2934,6 +2937,16 @@ async function lookupOrder(n){
 }
 const PORTAL_ORDER="https://designupload.logomatsllc.com/Design/ViewDesignHtml?designNumber=";
 const ART_PREF=[/no-?effects/i,/reviewed/i];
+/* Which of several customer files is the best artwork: enough pixels, and clean flat colour like a logo file rather than
+   a photo of a shop front or a mat (a 12 MP photo must not beat a crisp 1 MP logo). Clean files (most pixels in a few flat colours) come first; among them, more pixels and flatter colour win. */
+async function artScore(blob){
+  try{ const bm=await createImageBitmap(blob), w=bm.width, h=bm.height, sc=Math.min(1,256/Math.max(w,h)), cw=Math.max(1,Math.round(w*sc)), ch=Math.max(1,Math.round(h*sc));
+    const c=document.createElement("canvas"); c.width=cw; c.height=ch; const g=c.getContext("2d"); g.drawImage(bm,0,0,cw,ch); const d=g.getImageData(0,0,cw,ch).data;
+    const hist=new Map(); let n=0; for(let i=0;i<d.length;i+=4){ if(d[i+3]<128) continue; n++; const k=(d[i]>>4)<<8|(d[i+1]>>4)<<4|(d[i+2]>>4); hist.set(k,(hist.get(k)||0)+1); }
+    const top=[...hist.values()].sort((a,b)=>b-a).slice(0,6).reduce((a,b)=>a+b,0), flat=n? top/n : 0;
+    const blank= hist.size<2 ? 1 : 0;
+    return {w,h,flat,score: (flat>=0.8?100:0) + Math.log2(Math.min(w*h,6e6)+1) + 8*flat - 200*blank}; } // a clean logo file always beats a photo-like one
+  catch(e){ return {w:0,h:0,flat:0,score:-1}; } }
 async function useOrder(o){
   lookupMsg(o.fieldsGuessed? "Some fields are blank on the portal page: check size and colours below." : ""); $("lookupNo").value=o.number;
   renderOrder(o); $("orderText").value=o.text; fillFromOrder(o.text);
@@ -2945,11 +2958,10 @@ async function useOrder(o){
   const vec=pool.find(x=>/\.(pdf|ai|svg)$/i.test(x.name)); if(vec) a=vec;
   if(!apiOk){ lookupMsg("Order filled. Download the artwork with “Original” and drop it in."); return; }
   if(!vec && pool.length>1){ // several pictures: use the sharpest (most pixels), like the designers pick the best file
-    busy("Comparing "+pool.length+" artwork files…"); let best=null,bp=0;
+    busy("Comparing "+pool.length+" artwork files…"); let best=null,bs=-1;
     for(const x of pool){ try{ const r=await fetch("api/file?u="+encodeURIComponent(x.url)); if(!r.ok) continue; const b=await r.blob();
-      const px=await new Promise(res=>{ const im=new Image(); im.onload=()=>{ res(im.naturalWidth*im.naturalHeight); URL.revokeObjectURL(im.src); }; im.onerror=()=>res(0); im.src=URL.createObjectURL(b); });
-      if(px>bp){ bp=px; best={x,b}; } }catch(e){} }
-    busy(null); if(best){ lookupMsg(pool.length+" artwork files: using "+best.x.name+" (sharpest). Use Load to pick another."); await loadFromBlob(best.b,best.x.name); return; } }
+      const sc=await artScore(b); if(sc.score>bs){ bs=sc.score; best={x,b,sc}; } }catch(e){} }
+    busy(null); if(best){ lookupMsg(pool.length+" artwork files: using "+best.x.name+" ("+best.sc.w+" × "+best.sc.h+" px, "+(best.sc.flat>=0.75?"clean logo":"photo-like")+"). Use Load to pick another."); await loadFromBlob(best.b,best.x.name); return; } }
   await loadArtwork(a);
 }
 function hasBookmark(){ try{ return localStorage.getItem("matstudio.bm")==="1"; }catch(e){ return false; } }
@@ -3130,11 +3142,16 @@ function findCodes(p,text){
 const BG_WORDS=/(colou?r preference|preferred colou?r|mat colou?r|colou?r of the mat|couleur du tapis|farbe der matte|fond|background|\bbg\b|hintergrund|fondo|fundo|achtergrond|pozad|háttér|hatter|tło|tlo|sfondo|bakgrund|baggrund|tausta|grund)/i;
 const LOGO_WORDS=/(logo|texte?|text|schrift|lettering|letters|tekst|testo|texto|písmo|felirat|napis|szöveg)/i;
 function readSpecial(p,sp){
-  const res={bg:null, logo:[], shape:null, photo:false, keepAll:false, edgeCm:null, alignX:null, alignY:null, notes:[]}; if(!sp) return res;
+  const res={bg:null, logo:[], shape:null, photo:false, keepAll:false, edgeCm:null, alignX:null, alignY:null, fill:false, neg:[], negWords:[], notes:[]}; if(!sp) return res;
   { const m=sp.match(/(\d+(?:[.,]\d+)?)\s*cm\s*(?:du|de|des|from(?: the)?|vom|van|dal|of(?: the)?)?\s*(?:bord|edge|border|rand|kant|bordo|margin|marge)/i) || sp.match(/(?:margin|marge|bord|edge|rand|abstand)\D{0,20}(\d+(?:[.,]\d+)?)\s*cm/i);
     if(m){ const v=parseFloat(m[1].replace(",",".")); if(v>0 && v<60){ res.edgeCm=v; res.notes.push("Margin "+v+" cm from the edge (from instructions)."); } } }
+  { const SYN={noir:"black",schwarz:"black",negro:"black",nero:"black",zwart:"black",blanc:"white",weiss:"white","weiß":"white",blanco:"white",bianco:"white",wit:"white"};
+    for(const m of sp.toLowerCase().matchAll(/(?:\bno|\bnot|\bsans|\bpas\s+de|\bkein\w*|\bohne|\bsin|\bsenza|\bgeen|\bzonder|\bwithout)\s+([a-zà-ÿß]+)/g)) res.negWords.push(SYN[m[1]]||m[1]); }
   const clauses=sp.split(/\n|\/(?![\d])|;|\.(?=\s)/).map(c=>c.trim()).filter(Boolean);
-  for(const cl of clauses){ const codes=findCodes(p,cl); if(!codes.length) continue;
+  // "No black in background": a colour named after a no / not / sans / kein is one the customer does not want (Bricomarché 5158205)
+  const NEG=/(\bno|\bnot|\bsans|\bpas\s+(?:de|d'|en)|\bkein\w*|\bohne|\bsin|\bsenza|\bgeen|\bzonder|\bnon|\bwithout)\s+(?:\w+\s+)?$/i;
+  for(const cl of clauses){ const lcl=cl.toLowerCase(), posOf=c=>{ for(const k of [c.yarn.code, c.yarn.name, (c.yarn.name||"").split(" ").pop()]){ if(!k) continue; const i=lcl.indexOf(k.toLowerCase()); if(i>=0) return i; } return c.at; };
+    const all=findCodes(p,cl), codes=all.filter(c=>{ const i=posOf(c); const neg=NEG.test(cl.slice(Math.max(0,i-18),i)); if(neg) res.neg.push(c.yarn.label); return !neg; }); if(!codes.length) continue;
     const bgPos=cl.search(BG_WORDS), lgPos=cl.search(LOGO_WORDS);
     if(bgPos>=0 && lgPos>=0){ // both named: each colour belongs to the word right after it ("grey on a light ash background") or else the last word before it
       const kw=[]; for(const [re,t] of [[new RegExp(BG_WORDS.source,"gi"),"bg"],[new RegExp(LOGO_WORDS.source,"gi"),"logo"]]){ let m; while((m=re.exec(cl))) kw.push({at:m.index,t}); }
@@ -3146,12 +3163,14 @@ function readSpecial(p,sp){
   const t=sp.toLowerCase();
   if(/(half|1\/2|demi|halb|halv|semi)[^a-z]{0,3}\s*(round|rond|rund|circle|cercle|kreis|cirkel)|\barche?\b|\bbogen\b|\bdome\b|dôme/.test(t)) res.shape="arch";
   else if(/\b(ovale?|ovaal|oválne|ovális)\b/.test(t)) res.shape="oval";
-  else if(/\b(circle|circular|round mat|rond|runde?|kreis|cirkel|kör|kruh)\b|diameter|diamètre|durchmesser|(^|\s)ø\s*\d/.test(t) && !/round(ed)?\s+corner/.test(t)) res.shape="circle";
+  else if(/\b(circle|circular|round mat|rond|runde?|kreis|cirkel|kör|kruh|redond[ao]|rotond[ao]|circolare|okrągł\w*|kulat\w*)\b|diameter|diamètre|durchmesser|(^|\s)ø\s*\d/.test(t) && !/round(ed)?\s+corner/.test(t)) res.shape="circle";
   { // placement: "le logo doit être placé à gauche" (Deco Cuisine 5157385); only when one side is named
     const L=/\b(left|links|izquierda|sinistra|esquerda)\b|à gauche|a gauche/.test(t), R=/\b(right|rechts|derecha|destra|direita)\b|à droite|a droite/.test(t);
     const T=/\b(top|oben|arriba)\b|en haut|in alto|bovenaan/.test(t), B=/\b(bottom|unten|abajo)\b|en bas|in basso|onderaan/.test(t);
     if(L!==R) res.alignX=L?"left":"right"; if(T!==B) res.alignY=T?"top":"bottom";
     if(res.alignX||res.alignY) res.notes.push("Logo placed "+[res.alignY,res.alignX].filter(Boolean).join(" ")+" (from instructions): check the position and size."); }
+  // "mettre le logo sur toute la dimension du tapis": the logo fills the mat, small margin
+  if(/toute la (dimension|surface|largeur|taille)|tout le tapis|full (size|width|mat)|whole (mat|size)|entire mat|fill the (whole|mat|entire)|ganze[nr]? (matte|fläche|breite)|gesamte|todo el (tapete|felpudo|ancho)|tutta la (superficie|dimensione)/.test(t)){ res.fill=true; res.notes.push("Logo enlarged to fill the mat (from instructions)."); }
   if(/photo\s*-?\s*realisti|photoréalist|fotorealist|as a photo|print the photo/.test(t)) res.photo=true;
   if(/(do not|don't|dont|please don't)\s+(remove|delete|leave out)|include all|keep all|nothing removed|alle (texte|details)|nichts (weg|entfern)/.test(t)) res.keepAll=true;
   const old=t.match(/old mat\s*:?\s*(\d{6,})|re-?order|same (design )?as (before|last|old)|wie (die |das )?(alte|letzte)/); if(old) res.notes.push("Reorder"+(old[1]?" of mat "+old[1]:"")+": check the previous design first.");
@@ -3164,7 +3183,7 @@ function fillFromOrder(txt){
   const num=v=>parseFloat(String(v).replace(",","."));
   const done=[], missed=[];
   // every order starts from a clean slate
-  S.edgeCm=null; S.alignX=null; S.alignY=null; S.innerPanel=null; S.bgLocked=false; S.bgSrc=null; S.bgOrder=null; S.photoReq=false; S.photoUser=false; S.logoSet=[]; S.logoYarn="auto"; S.photo=false; S.keepAll=false; S.orderNotes=[]; S.corner="square"; $("corner").value="square";
+  S.edgeCm=null; S.alignX=null; S.alignY=null; S.fill=false; S.innerPanel=null; S.bgLocked=false; S.bgSrc=null; S.bgOrder=null; S.photoReq=false; S.photoUser=false; S.logoSet=[]; S.logoYarn="auto"; S.photo=false; S.keepAll=false; S.orderNotes=[]; S.corner="square"; $("corner").value="square";
   S.minDetail=3; $("minDetail").value=3; const ph0=$("photoMode"); if(ph0) ph0.checked=false;
   const id=(txt.match(/Design Number\s*:?\s*(\d{4,})/i)||txt.match(/Design Number[\s\S]{0,60}?\b(\d{6,8})\b/i)||[])[1]; if(id){ S.id=id; $("designId").value=id; done.push("design "+id); } else missed.push("design ID");
   const prod=(txt.match(/^[ \t]*\d+\s*-\s*(.*(?:impression|colou?r\s*star|promo|scrape).*)$/im)||[])[1]||"";
@@ -3185,26 +3204,27 @@ function fillFromOrder(txt){
   const bgT=line("Background Colou?r"), bgY=findYarn(p,bgT); if(bgY){ S.bg=bgY.label; S.bgLocked=true; S.bgSrc="order"; S.bgOrder=bgY.label; done.push("background "+bgY.label); } else if(bgT) missed.push("background \""+bgT+"\"");
   const bdT=line("Border"); if(bdT!==null){ const bdY=/without|^no\b|none/i.test(bdT)||!bdT? null : findYarn(p,bdT); S.border=bdY?bdY.label:"none"; if(bdT && !bdY && !/without|^no\b|none/i.test(bdT)) missed.push("border \""+bdT+"\""); }
   const lgT=line("Logo Colou?r"); const lgCodes=findCodes(p,lgT).map(c=>c.yarn); const lgY=lgCodes.length?null:findYarn(p,lgT);
-  S.logoSet=[]; S.logoYarn="auto";
+  S.logoSet=[]; S.logoYarn="auto"; S.orderLogo=!!(lgCodes.length||lgY);
   if(lgCodes.length>1){ S.logoSet=lgCodes.map(y=>y.label); S.logoYarn="set"; done.push("logo "+S.logoSet.join(" + ")); }
   else if(lgCodes.length===1||lgY){ S.logoYarn=(lgCodes[0]||lgY).label; done.push("logo "+S.logoYarn); }
   else if(lgT) missed.push("logo colour \""+lgT+"\"");
   // Special Instructions: colour codes, shape, photo and "keep everything" requests, in any language
   const spRaw=(txt.match(/Special Instructions\s*:?\s*([\s\S]*?)(?:\n\s*(?:Download Links|Click to download|Similar Designs|Return to Queue)|$)/i)||[])[1]||"";
   const SP=readSpecial(p,spRaw); const notes=[];
+  if(S.bgSrc==="order" && !SP.bg && (SP.neg.some(l=>{ const a=yarnBy(p,l), b=yarnBy(p,S.bgOrder); return a&&b&&de2000(a.lab,b.lab)<10; }) || SP.negWords.includes(((yarnBy(p,S.bgOrder)||{}).name||"").toLowerCase().split(/[\s-]+/)[0]))){ S.bgSrc=null; S.bgLocked=false; notes.push("not "+S.bgOrder+" as background (the instructions say no "+((yarnBy(p,S.bgOrder)||{}).name||"").toLowerCase().split(/[\s-]+/)[0]+")"); }
   if(SP.bg){ S.bg=SP.bg.label; S.bgLocked=true; S.bgSrc="instr"; notes.push("background "+SP.bg.label+" (from instructions)"); }
   if(SP.logo.length){ const set=[...new Set([...(S.logoYarn!=="auto"&&S.logoYarn!=="set"?[S.logoYarn]:[]),...S.logoSet,...SP.logo.map(y=>y.label)])].filter(l=>l!==S.bg);
     if(set.length===1){ S.logoYarn=set[0]; S.logoSet=[]; } else if(set.length>1){ S.logoSet=set; S.logoYarn="set"; }
     notes.push("logo "+set.join(" + ")+" (from instructions)"); }
   if(SP.edgeCm) S.edgeCm=SP.edgeCm;
-  S.alignX=SP.alignX; S.alignY=SP.alignY; if(SP.alignX||SP.alignY) notes.push("logo "+[SP.alignY,SP.alignX].filter(Boolean).join(" "));
+  S.alignX=SP.alignX; S.alignY=SP.alignY; S.fill=SP.fill; if(SP.fill) notes.push("logo fills the mat"); if(SP.logo.length) S.orderLogo=true; if(SP.alignX||SP.alignY) notes.push("logo "+[SP.alignY,SP.alignX].filter(Boolean).join(" "));
   if(SP.shape){ S.corner=SP.shape; $("corner").value=SP.shape; notes.push(SP.shape+" mat"); }
   if(SP.photo){ S.photoReq=true; notes.push("photo-realistic artwork requested"); }
   if(SP.keepAll){ S.keepAll=true; S.minDetail=1; $("minDetail").value=1; notes.push("keep all small details"); }
   S.orderNotes=SP.notes;
   fillYarnSelects();
   if(S.clusters.length){ const p2=pal(); for(const c of S.clusters){ const m=nearestYarn(p2,c.lab); c.yarn=m.yarn.label; c.de=m.de; } separateYarns(); applyLogoYarn(); decideBg(); decidePanel(); contrastSwap(); fillYarnSelects();
-    const ph=S.photoReq || (STYLES[S.style].print && S.resid>PHOTO_RESID); S.photo=ph; $("photoMode").checked=ph; computeBBox(); renderYarnMap(); retrace(); } else render();
+    const ph=S.photoReq || autoPhoto(); S.photo=ph; $("photoMode").checked=ph; computeBBox(); renderYarnMap(); retrace(); } else render();
   updateSpec();
   const spTxt=spRaw.trim().replace(/\s+/g," "); const sp=spTxt && !/^none\.?$/i.test(spTxt) ? " Special instructions: “"+spTxt+"”" : "";
   const r=$("fillResult"); r.hidden=false; r.textContent="Filled: "+done.join(", ")+"."+(notes.length?" From instructions: "+notes.join(", ")+".":"")+(missed.length?" Not found, set by hand: "+missed.join(", ")+".":"")+(S.orderNotes.length?" "+S.orderNotes.join(" "):"")+sp;
