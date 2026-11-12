@@ -84,6 +84,11 @@ function syncChips(){
   const lg=(S.logoYarn==="auto"||S.logoYarn==="set")?null:yarnBy(p,S.logoYarn); $("logoChip").style.background=lg?lg.hex:"conic-gradient(#c33,#e93,#3a6,#36c,#c33)"; if(lg) lastHex.logo=lg.hex;
 }
 function applyLogoYarn(){ const p=pal();
+  if(S.logoYarn==="auto" && S.logoWord && S.clusters.length){ // the instructions name a plain colour: that colour of the artwork (its backdrop too), else the nearest yarn
+    const fam=w=>w==="gold"?["gold","yellow"]:w==="blue"?["blue"]:[w];
+    const c=[...S.clusters].filter(c=>fam(S.logoWord).includes(colourFamily(c.hex))).sort((a,b)=>b.count-a.count)[0];
+    const y= c? nearestYarn(p,c.lab).yarn : nearestYarn(p,rgbToLab(...hexToRgb(COLOUR_HEX[S.logoWord]))).yarn;
+    for(const k of S.clusters) if(!k.bg){ k.yarn=y.label; k.de=de2000(k.lab,y.lab); } return; }
   if(S.logoYarn==="set"){ const ys=S.logoSet.map(l=>yarnBy(p,l)).filter(Boolean); if(!ys.length) return;
     // several order colours: each logo colour goes to the closest of the colours the order asks for
     // a page-coloured pocket kept inside an emblem (the white inside a red hexagon outline) stays the mat colour when the mat is that colour
@@ -295,6 +300,32 @@ function analyze(){
     for(let q=1;q<=ec.n;q++){ if(ec.x1[q]<m||ec.x0[q]>w-1-m||ec.y1[q]<m||ec.y0[q]>h-1-m){ hug[q]=1; anyH=true; } }
     if(anyH) for(let i=0;i<N;i++) if(hug[ec.lab[i]]) idx[i]=bgC; }
   // Background connected to the image edge (used to cut a photo's plain backdrop away).
+  // Thin light strokes in small enlarged artwork (Nord Anglia's grey "DUBLIN", 1.5 px wide) are blended with the page and fall
+  // just on the page side of the half-way mark, so letters break apart. Pixels that are at least 38% of the way from the page
+  // colour to a logo colour (on the line between them) count as that logo colour.
+  if(bgC>=0 && !S.cleanup && (S.upscale||1)>2 && S.thinRescue!==false){ const B=cents[bgC].lab, cache=new Map(); let moved=0;
+    // only to mend shapes that are already there (a broken letter), never to bring up faint specks of their own
+    const big=components(w,h,i=>idx[i]!==TR&&idx[i]!==bgC,(i,j)=>idx[i]===idx[j]), minC=Math.max(30,(window.MEND_MIN||0.00006)*N), src=idx.slice();
+    const nextTo=(i,k)=>{ const x=i%w; for(const j of [x>0?i-1:-1,x<w-1?i+1:-1,i-w,i+w]){ if(j<0||j>=N) continue; if(src[j]===k && big.size[big.lab[j]]>=minC) return true; } return false; };
+    const cand=new Uint8Array(N);
+    for(let i=0;i<N;i++){ if(src[i]!==bgC) continue; const q=i*4, key=(data[q]>>2)<<12|(data[q+1]>>2)<<6|(data[q+2]>>2); let to=cache.get(key);
+      if(to===undefined){ to=-1; const L=rgbToLab(data[q],data[q+1],data[q+2]); let bt=0;
+        for(let k=0;k<cents.length;k++){ if(k===bgC) continue; const C=cents[k].lab, ab=[C[0]-B[0],C[1]-B[1],C[2]-B[2]], L2=ab[0]**2+ab[1]**2+ab[2]**2; if(L2<400) continue;
+          const t=((L[0]-B[0])*ab[0]+(L[1]-B[1])*ab[1]+(L[2]-B[2])*ab[2])/L2; if(t<0.38||t>=0.5) continue;
+          const res=Math.hypot(B[0]+t*ab[0]-L[0],B[1]+t*ab[1]-L[1],B[2]+t*ab[2]-L[2]); if(res<10 && t>bt){ bt=t; to=k; } }
+        cache.set(key,to); }
+      if(to>=0) cand[i]=to+1; }
+    // grow from the existing shapes through the candidate pixels only
+    const q=[]; for(let i=0;i<N;i++) if(cand[i] && nextTo(i,cand[i]-1)){ idx[i]=cand[i]-1; cand[i]=0; q.push(i); moved++; }
+    while(q.length){ const i=q.pop(), x=i%w; for(const j of [x>0?i-1:-1,x<w-1?i+1:-1,i-w,i+w]){ if(j<0||j>=N||!cand[j]||cand[j]-1!==idx[i]) continue; idx[j]=idx[i]; cand[j]=0; q.push(j); moved++; } }
+    // keep a mended patch only where it joins two separate pieces (a gap in a letter), not where it just fattens an edge
+    const grown=new Uint8Array(N); for(let i=0;i<N;i++) grown[i]= idx[i]!==src[i] ? 1:0;
+    const gc=components(w,h,i=>grown[i]===1,()=>true), touch=new Map();
+    for(let i=0;i<N;i++){ if(!grown[i]) continue; const g=gc.lab[i], x=i%w; for(const j of [x>0?i-1:-1,x<w-1?i+1:-1,i-w,i+w]){ if(j<0||j>=N||grown[j]||src[j]===bgC||src[j]===TR) continue;
+      let t=touch.get(g); if(!t){ t=new Set(); touch.set(g,t); } t.add(big.lab[j]); } }
+    const thick=g=>gc.size[g]/Math.max(1,gc.x1[g]-gc.x0[g]+1,gc.y1[g]-gc.y0[g]+1); // a restored stroke piece is as thick as a stroke; an edge band is a pixel or two
+    moved=0; for(let i=0;i<N;i++){ if(!grown[i]) continue; const g=gc.lab[i], t=touch.get(g); if(!t || (t.size<2 && thick(g)<0.6*(S.upscale||1))) idx[i]=bgC; else moved++; }
+    S.thinMoved=moved; }
   S.bgConn=null;
   if(bgC>=0){ const conn=new Uint8Array(N), seenT=new Uint8Array(N), st=[];
     // flood from the picture edge through background and transparent pixels
@@ -376,6 +407,13 @@ function thickenThin(m,w,h,r){
     // ridge of the stroke: no neighbour is further from the edge
     if(dt[i-1]>v||dt[i+1]>v||dt[i-w]>v||dt[i+w]>v||dt[i-w-1]>v||dt[i-w+1]>v||dt[i+w-1]>v||dt[i+w+1]>v) continue;
     if(cc.size[cc.lab[i]]<minA) continue; add.push(i); }
+  // A tapering tip of a thick shape (the points of METRO's crescents) is thin only because it tapers: growing it gives
+  // blobs and hooks. Leave a thin part alone when, close by, the same shape is much thicker than here.
+  if(add.length && window.TAPER_KEEP!==false){ const W=Math.max(2,Math.round(3*r)), rowMax=new Float32Array(N), near=new Float32Array(N);
+    for(let y=0;y<h;y++){ const o=y*w; for(let x=0;x<w;x++){ let m=0; for(let k=Math.max(0,x-W);k<=Math.min(w-1,x+W);k++) if(dt[o+k]>m) m=dt[o+k]; rowMax[o+x]=m; } }
+    const keep=[]; for(const i of add){ const x=i%w, y=(i-x)/w; let m=0; for(let k=Math.max(0,y-W);k<=Math.min(h-1,y+W);k++){ const v=rowMax[k*w+x]; if(v>m) m=v; }
+      if(m>=2.2*Math.max(dt[i],1) && m>=1.5*r) continue; keep.push(i); }
+    add.length=0; add.push(...keep); }
   for(const i of add){ const x=i%w, y=(i-x)/w; for(const [dx,dy] of disc){ const X=x+dx, Y=y+dy; if(X>=0&&Y>=0&&X<w&&Y<h) m[Y*w+X]=1; } }
 }
 
@@ -751,8 +789,8 @@ function doTrace(){
   const rs=Math.max(w,h)/1400; // detail windows scale with the working resolution
   // enlarged low-res artwork: one source pixel is several work pixels, so JPEG ripples along edges are that big too;
   // fitting tolerances grow with the enlargement so straight edges come out straight (Ressos 5157439)
-  const fitScale=(S.upscale||1)>1.6? Math.min(window.FIT_SCALE_MAX||5, 1+(window.FIT_SCALE_K||1.0)*((S.upscale||1)-1)) : 1;
-  const fit={round:S.roundMM>0? S.roundMM/mmPerPx : 0, tol:(0.45+S.smooth*0.15)*fitScale, lineTol:0.6*fitScale, lineBias:0.06, minLine:Math.max(Math.round(14*rs),Math.round(6/mmPerPx)), trim:Math.round(3*rs), k:Math.round(4*rs), cornerAngle:1.0, cornerCut:1.2*rs, capAngle:1.75, keepAngle:0.9, capLen:S.roundMM>0? 2.6*S.roundMM/mmPerPx : 0, smoothPasses:Math.round(4*rs), sharp:(S.upscale||1)<=1.6};
+  const fitScale=Math.min(window.FIT_SCALE_MAX||5, Math.max(window.FIT_BASE||1, 1+(window.FIT_SCALE_K||1.0)*((S.upscale||1)-1))); // JPEG ripples on curves: designers want smooth arcs (METRO 5159552)
+  const fit={round:S.roundMM>0? S.roundMM/mmPerPx : 0, tol:(0.45+S.smooth*0.15)*fitScale, lineTol:0.6*fitScale, lineBias:0.06, minLine:Math.max(Math.round(14*rs),Math.round(6/mmPerPx)), trim:Math.round(3*rs), k:Math.round(4*rs), cornerAngle:1.0, cornerCut:1.2*rs, capAngle:1.75, keepAngle:0.9, capLen:S.roundMM>0? 2.6*S.roundMM/mmPerPx : 0, smoothPasses:Math.round(4*rs*(window.SMOOTH_K||1)), sharp:(S.upscale||1)<=(window.SHARP_UP||2.6)};
   S.pendingOrder=order; S.traceJob++; busy("Tracing "+order.length+" colour layer"+(order.length===1?"":"s")+"…");
   if(!order.length){ S.layers=[]; busy(null); render(); updateSpec(); return; }
   getWorker().postMessage({job:S.traceJob,w,h,masks,opts,fit});
@@ -1401,13 +1439,29 @@ function findYarn(p,text){
 }
 /* Yarn codes written in free text: "c11", "C5", "J01", "B8", "394 Champagne". Letter codes are matched anywhere;
    plain numbers (Classic Impression) only when the yarn's name follows or a colour word comes before. */
+/* Common Pantone coated inks as sRGB (approximate published values), for instructions that give Pantone numbers. */
+const PANTONE={"533":"#1F2A44","7408":"#F6BE00","187":"#A6192E","186":"#C8102E","485":"#DA291C","032":"#EF3340","021":"#FE5000","151":"#FF8200",
+ "116":"#FFCD00","109":"#FFD100","123":"#FFC72C","7406":"#F1C400","871":"#84754E","872":"#85714D","877":"#8A8D8F","280":"#012169","286":"#0033A0",
+ "287":"#003087","288":"#002D72","289":"#0C2340","2945":"#004C97","300":"#005EB8","299":"#00A3E0","2925":"#009CDE","3005":"#0077C8","7462":"#00558C",
+ "541":"#003C71","655":"#002454","2768":"#071D49","282":"#041E42","354":"#00B140","348":"#00843D","349":"#046A38","355":"#009639","361":"#43B02A",
+ "375":"#97D700","376":"#84BD00","368":"#78BE20","3425":"#006341","7481":"#00B74F","266":"#753BBD","2685":"#330072","2597":"#5C068C","268":"#582C83",
+ "process blue":"#0085CA","reflex blue":"#001489","warm red":"#F9423A","black":"#2D2926","cool gray 11":"#53565A","cool gray 9":"#75787B","425":"#54585A",
+ "431":"#5B6770","7545":"#425563","1795":"#D22630","200":"#BA0C2F","202":"#862633","201":"#9D2235","7621":"#AB2328","1505":"#FF6900","165":"#FF6720",
+ "144":"#ED8B00","137":"#FFA300","7548":"#FFC600","102":"#FCE300","yellow":"#FEDD00","3125":"#00AEC7","320":"#009CA6","7704":"#0085AD","312":"#00A9CE",
+ "2995":"#00A9E0","7690":"#005776","7469":"#005F86","476":"#4E3629","4625":"#4F2C1D","7533":"#4B3D2A","7527":"#D6D2C4","7506":"#EFDBB2","465":"#B9975B",
+ "7502":"#CEB888","7753":"#C1A01E","219":"#DA1884","213":"#E31C79","rhodamine red":"#E10098","7417":"#E04E39","369":"#64A70B","7741":"#44883E",
+ "293":"#003DA5","2935":"#0057B8","285":"#0072CE","2728":"#0047BB","072":"#10069F","2736":"#1E22AA","301":"#004B87","302":"#003B5C","303":"#002A3A",
+ "7546":"#253746","433":"#1D252D","7547":"#131E29","5463":"#071D25","426":"#25282A","7409":"#F0B323","1235":"#FFB81C","130":"#F2A900","124":"#EAAA00",
+ "1225":"#FFC845","7405":"#F2CD00","7739":"#319B42","356":"#007A33","357":"#215732","3435":"#154734","7732":"#007041","347":"#009A44","7740":"#3A913F",
+ "1805":"#AF272F","1797":"#CB333B","7427":"#97233F","208":"#861F41","209":"#6F263D","7420":"#9B2242","2602":"#87189D","2612":"#702F8A","2623":"#5F2167",
+ "7684":"#385E9D","7685":"#204C8A","7686":"#1D4F91","7687":"#1D428A","2747":"#001A70","2758":"#001E60","7455":"#3A5DAE","7461":"#0077C0","801":"#009ACE"};
 function findCodes(p,text){
   const out=[], seen=new Set(), Y=YARNS[p]; if(!text) return out;
   const norm=c=>{ const m=String(c).toUpperCase().match(/^([A-Z]{0,2})0*(\d+)$/); return m? m[1]+"|"+(+m[2]) : null; };
   const byCode=new Map(); for(const y of Y){ const k=norm(y.code.replace(/\(.*$/,"")); if(k && !y.manual && !byCode.has(k)) byCode.set(k,y); }
   const re=/(^|[^A-Za-z0-9])([A-Za-z]{1,2})\s?0*(\d{1,3})(?![\dA-Za-z])|(^|[^A-Za-z0-9.,])(\d{3})(?![\d.,]|\s*(?:cm|mm|m\b|x))/g; let m;
   while((m=re.exec(text))){
-    let y=null;
+    let y=null; if(/pantone\s*[^a-z0-9]?$/i.test(text.slice(Math.max(0,m.index-10),m.index+1))) continue; // "Pantone 116 C" is not yarn 116
     if(m[2]){ y=byCode.get(m[2].toUpperCase()+"|"+(+m[3])); }
     else { const cand=byCode.get("|"+(+m[5])); if(cand){ const after=text.slice(m.index+m[0].length, m.index+m[0].length+24).toLowerCase(), before=text.slice(Math.max(0,m.index-24), m.index).toLowerCase();
         if(after.trim().startsWith(cand.name.toLowerCase().split(" ")[0]) || /colou?r|couleur|farbe|kleur|color|fond|logo|texte?/.test(before)) y=cand; } }
@@ -1421,12 +1475,25 @@ function findCodes(p,text){
   const used=[];
   for(const o of named){ const at=low.indexOf(o.n); if(used.some(([a,b])=>at<b && at+o.n.length>a)) continue; used.push([at,at+o.n.length]);
     if(!seen.has(o.y.label)){ seen.add(o.y.label); out.push({yarn:o.y, at:Math.max(0,at-1)}); } }
+  // Pantone references ("Pantone 533 C", "PMS 187"): the nearest yarn to that ink (MINOVA 5159628)
+  for(const pm of text.matchAll(/(?:pantone|pms)\s*(\d{3,4}|process blue|reflex blue|warm red|cool gr[ae]y \d{1,2}|black|yellow|rhodamine red)\s*(?:c\b|c(?=[A-Z])|u\b)?/gi)){
+    const hex=PANTONE[pm[1].toLowerCase().replace("grey","gray")]; if(!hex) continue;
+    const y=nearestYarn(p,rgbToLab(...hexToRgb(hex))).yarn; if(y && !seen.has(y.label)){ seen.add(y.label); out.push({yarn:y, at:pm.index, pantone:pm[1]}); } }
   return out.sort((a,b)=>a.at-b.at);
 }
+const COLOUR_WORDS=[["blue",/\b(blue|bleu|blau|azul|blu|blauw|niebiesk\w*)\b/],["red",/\b(red|rouge|rot|rojo|rosso|rood|czerwon\w*)\b/],["green",/\b(green|vert|grün|gruen|verde|groen|zielon\w*)\b/],
+  ["yellow",/\b(yellow|jaune|gelb|amarillo|giallo|geel)\b/],["orange",/\b(orange|naranja|arancione|oranje)\b/],["purple",/\b(purple|violet|lila|morado|viola|paars)\b/],
+  ["pink",/\b(pink|rose|rosa|roze)\b/],["gold",/\b(gold|golden|doré|dorado|oro|goud)\b/],["silver",/\b(silver|argent|silber|plata|argento|zilver)\b/],
+  ["white",/\b(white|blanc|weiss|weiß|blanco|bianco|wit)\b/],["black",/\b(black|noir|schwarz|negro|nero|zwart)\b/],["grey",/\b(gr[ae]y|gris|grau|grigio|grijs)\b/],["brown",/\b(brown|marron|braun|marrón|marrone|bruin)\b/]];
+const COLOUR_HEX={blue:"#1F5FBF",red:"#C8102E",green:"#2E9E44",yellow:"#FFD100",orange:"#FF8200",purple:"#5C2D91",pink:"#E7759A",gold:"#C9A227",silver:"#A7A9AC",white:"#FFFFFF",black:"#1A1A1A",grey:"#808080",brown:"#6B4226"};
+function colourFamily(hex){ const [r,g,b]=hexToRgb(hex).map(v=>v/255), mx=Math.max(r,g,b), mn=Math.min(r,g,b), d=mx-mn, sat=mx? d/mx : 0;
+  if(sat<0.22) return mx>0.85?"white": mx<0.2?"black":"grey";
+  let h= d===0?0 : mx===r? 60*(((g-b)/d)%6) : mx===g? 60*((b-r)/d+2) : 60*((r-g)/d+4); if(h<0) h+=360;
+  if(h<15||h>=345) return mx<0.45?"brown":"red"; if(h<40) return mx<0.55?"brown":"orange"; if(h<65) return mx<0.75&&sat<0.75?"gold":"yellow"; if(h<170) return "green"; if(h<260) return "blue"; if(h<300) return "purple"; return "pink"; }
 const BG_WORDS=/(colou?r preference|preferred colou?r|mat colou?r|colou?r of the mat|couleur du tapis|farbe der matte|fond|background|\bbg\b|hintergrund|fondo|fundo|achtergrond|pozad|háttér|hatter|tło|tlo|sfondo|bakgrund|baggrund|tausta|grund)/i;
 const LOGO_WORDS=/(logo|texte?|text|schrift|lettering|letters|tekst|testo|texto|písmo|felirat|napis|szöveg)/i;
 function readSpecial(p,sp){
-  const res={bg:null, logo:[], shape:null, photo:false, keepAll:false, edgeCm:null, alignX:null, alignY:null, fill:false, neg:[], negWords:[], notes:[]}; if(!sp) return res;
+  const res={bg:null, logo:[], shape:null, photo:false, keepAll:false, edgeCm:null, alignX:null, alignY:null, fill:false, neg:[], negWords:[], logoWord:null, notes:[]}; if(!sp) return res;
   { const m=sp.match(/(\d+(?:[.,]\d+)?)\s*cm\s*(?:du|de|des|from(?: the)?|vom|van|dal|of(?: the)?)?\s*(?:bord|edge|border|rand|kant|bordo|margin|marge)/i) || sp.match(/(?:margin|marge|bord|edge|rand|abstand)\D{0,20}(\d+(?:[.,]\d+)?)\s*cm/i);
     if(m){ const v=parseFloat(m[1].replace(",",".")); if(v>0 && v<60){ res.edgeCm=v; res.notes.push("Margin "+v+" cm from the edge (from instructions)."); } } }
   { const SYN={noir:"black",schwarz:"black",negro:"black",nero:"black",zwart:"black",blanc:"white",weiss:"white","weiß":"white",blanco:"white",bianco:"white",wit:"white"};
@@ -1445,6 +1512,13 @@ function readSpecial(p,sp){
     else if(bgPos>=0){ res.bg=res.bg||codes[0].yarn; codes.slice(1).forEach(c=>res.logo.push(c.yarn)); }
     else codes.forEach(c=>res.logo.push(c.yarn)); }
   const t=sp.toLowerCase();
+  // "use the blue in text and logo": a plain colour word for the logo, matched later to that colour in the artwork (Nord Anglia 5159147)
+  if(!res.logo.length){ for(const cl of clauses){ if(!LOGO_WORDS.test(cl)) continue; const lc=cl.toLowerCase();
+      for(const [fam,re] of COLOUR_WORDS){ const m=lc.match(re); if(!m) continue; const before=lc.slice(Math.max(0,m.index-18),m.index);
+        if(/(background|fond|hintergrund|fondo|achtergrond)\W*$/.test(before) || NEG.test(before)) continue;
+        const after=lc.slice(m.index+m[0].length, m.index+m[0].length+16); if(/^\W*(background|fond|hintergrund|fondo|achtergrond)/.test(after)) continue;
+        res.logoWord=fam; break; } if(res.logoWord) break; }
+    if(res.logoWord) res.notes.push("Logo in "+res.logoWord+" (from instructions): the "+res.logoWord+" of the artwork, or the nearest yarn."); }
   if(/(half|1\/2|demi|halb|halv|semi)[^a-z]{0,3}\s*(round|rond|rund|circle|cercle|kreis|cirkel)|\barche?\b|\bbogen\b|\bdome\b|dôme/.test(t)) res.shape="arch";
   else if(/\b(ovale?|ovaal|oválne|ovális)\b/.test(t)) res.shape="oval";
   else if(/\b(circle|circular|round mat|rond|runde?|kreis|cirkel|kör|kruh|redond[ao]|rotond[ao]|circolare|okrągł\w*|kulat\w*)\b|diameter|diamètre|durchmesser|(^|\s)ø\s*\d/.test(t) && !/round(ed)?\s+corner/.test(t)) res.shape="circle";
@@ -1455,6 +1529,8 @@ function readSpecial(p,sp){
     if(res.alignX||res.alignY) res.notes.push("Logo placed "+[res.alignY,res.alignX].filter(Boolean).join(" ")+" (from instructions): check the position and size."); }
   // "mettre le logo sur toute la dimension du tapis": the logo fills the mat, small margin
   if(/toute la (dimension|surface|largeur|taille)|tout le tapis|full (size|width|mat)|whole (mat|size)|entire mat|fill the (whole|mat|entire)|ganze[nr]? (matte|fläche|breite)|gesamte|todo el (tapete|felpudo|ancho)|tutta la (superficie|dimensione)/.test(t)){ res.fill=true; res.notes.push("Logo enlarged to fill the mat (from instructions)."); }
+  // "Ta bort 'Nära' och sträcket" (remove Nära and the dash): parts to take out by hand (ICA 5159135)
+  if(/\b(remove|delete|leave out|take out|ta bort|entfern\w*|weglassen|supprim\w*|enlev\w*|retir\w*|quit\w*|elimin\w*|verwijder\w*|weghal\w*|rimuov\w*|togli\w*|fjern\w*|poista\w*|usuń\w*)\b/.test(t) && !/(do not|don't|dont|please don't|ne pas|nicht|no)\s+(remove|delete|supprim|entfern|quit|elimin|rimuov)/.test(t)) res.notes.push("The instructions ask to remove part of the artwork: take it out by hand before uploading.");
   if(/photo\s*-?\s*realisti|photoréalist|fotorealist|as a photo|print the photo/.test(t)) res.photo=true;
   if(/(do not|don't|dont|please don't)\s+(remove|delete|leave out)|include all|keep all|nothing removed|alle (texte|details)|nichts (weg|entfern)/.test(t)) res.keepAll=true;
   const old=t.match(/old mat\s*:?\s*(\d{6,})|re-?order|same (design )?as (before|last|old)|wie (die |das )?(alte|letzte)/); if(old) res.notes.push("Reorder"+(old[1]?" of mat "+old[1]:"")+": check the previous design first.");
@@ -1467,7 +1543,7 @@ function fillFromOrder(txt){
   const num=v=>parseFloat(String(v).replace(",","."));
   const done=[], missed=[];
   // every order starts from a clean slate
-  S.edgeCm=null; S.alignX=null; S.alignY=null; S.fill=false; S.innerPanel=null; S.bgLocked=false; S.bgSrc=null; S.bgOrder=null; S.photoReq=false; S.photoUser=false; S.logoSet=[]; S.logoYarn="auto"; S.photo=false; S.keepAll=false; S.orderNotes=[]; S.corner="square"; $("corner").value="square";
+  S.edgeCm=null; S.alignX=null; S.alignY=null; S.fill=false; S.logoWord=null; S.innerPanel=null; S.bgLocked=false; S.bgSrc=null; S.bgOrder=null; S.photoReq=false; S.photoUser=false; S.logoSet=[]; S.logoYarn="auto"; S.photo=false; S.keepAll=false; S.orderNotes=[]; S.corner="square"; $("corner").value="square";
   S.minDetail=3; $("minDetail").value=3; const ph0=$("photoMode"); if(ph0) ph0.checked=false;
   const id=(txt.match(/Design Number\s*:?\s*(\d{4,})/i)||txt.match(/Design Number[\s\S]{0,60}?\b(\d{6,8})\b/i)||[])[1]; if(id){ S.id=id; $("designId").value=id; done.push("design "+id); } else missed.push("design ID");
   const prod=(txt.match(/^[ \t]*\d+\s*-\s*(.*(?:impression|colou?r\s*star|promo|scrape).*)$/im)||[])[1]||"";
@@ -1501,7 +1577,7 @@ function fillFromOrder(txt){
     if(set.length===1){ S.logoYarn=set[0]; S.logoSet=[]; } else if(set.length>1){ S.logoSet=set; S.logoYarn="set"; }
     notes.push("logo "+set.join(" + ")+" (from instructions)"); }
   if(SP.edgeCm) S.edgeCm=SP.edgeCm;
-  S.alignX=SP.alignX; S.alignY=SP.alignY; S.fill=SP.fill; if(SP.fill) notes.push("logo fills the mat"); if(SP.logo.length) S.orderLogo=true; if(SP.alignX||SP.alignY) notes.push("logo "+[SP.alignY,SP.alignX].filter(Boolean).join(" "));
+  S.alignX=SP.alignX; S.alignY=SP.alignY; S.fill=SP.fill; S.logoWord=SP.logoWord; if(SP.logoWord){ S.orderLogo=true; notes.push("logo "+SP.logoWord); } if(SP.fill) notes.push("logo fills the mat"); if(SP.logo.length) S.orderLogo=true; if(SP.alignX||SP.alignY) notes.push("logo "+[SP.alignY,SP.alignX].filter(Boolean).join(" "));
   if(SP.shape){ S.corner=SP.shape; $("corner").value=SP.shape; notes.push(SP.shape+" mat"); }
   if(SP.photo){ S.photoReq=true; notes.push("photo-realistic artwork requested"); }
   if(SP.keepAll){ S.keepAll=true; S.minDetail=1; $("minDetail").value=1; notes.push("keep all small details"); }
