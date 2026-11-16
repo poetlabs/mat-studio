@@ -411,6 +411,47 @@ function smoothMask(m,w,h,r){ if(r<1) return; const N=w*h; let a=new Float32Arra
       for(let y=0;y<h;y++){ a[y*w+x]=acc/(2*r+1); acc+=b[Math.min(h-1,y+r+1)*w+x]-b[Math.max(0,y-r)*w+x]; } } }
   for(let i=0;i<N;i++) m[i]=a[i]>=0.5?1:0; }
 
+/* Monoline strokes (an outline ring, script lettering, a rule): the customer's file gives them ripples and lumps, the
+   designer draws one smooth line of even width (BQS outline, Maison Adeline script). Find components that are long and
+   of nearly constant width, thin them to a centre line, and draw that line back at one width, then smooth the edge. */
+function evenStrokes(m,w,h,rMin){
+  const N=w*h, dt=chamfer(m,w,h), cc=components(w,h,i=>m[i]===1,()=>true), n=cc.n; if(!n) return 0;
+  const widths=Array.from({length:n+1},()=>[]);
+  for(let y=1;y<h-1;y++) for(let x=1;x<w-1;x++){ const i=y*w+x, v=dt[i]; if(!v) continue;
+    if(dt[i-1]>v||dt[i+1]>v||dt[i-w]>v||dt[i+w]>v||dt[i-w-1]>v||dt[i-w+1]>v||dt[i+w-1]>v||dt[i+w+1]>v) continue; widths[cc.lab[i]].push(v); }
+  const maxDim=Math.max(w,h); let done=0;
+  for(let k=1;k<=n;k++){ const ws=widths[k]; if(ws.length<30 || cc.size[k]<200) continue; ws.sort((a,b)=>a-b);
+    const q=f=>ws[Math.min(ws.length-1,Math.floor(f*ws.length))], med=q(0.5), p15=q(0.15), p85=q(0.85);
+    if(med<1.2 || 2*med>0.035*maxDim) continue;                 // a thin stroke, not a solid shape
+    if(p85>1.55*Math.max(p15,1)) continue;                      // nearly even width along its length
+    if(cc.size[k]/((2*med)*(2*med))<12) continue;               // long, not a dot or a short dash
+    if(cc.size[k] > 0.5*(cc.x1[k]-cc.x0[k]+1)*(cc.y1[k]-cc.y0[k]+1)) continue; // a straight bar keeps its square ends
+    const x0=Math.max(0,cc.x0[k]-2), y0=Math.max(0,cc.y0[k]-2), x1=Math.min(w-1,cc.x1[k]+2), y1=Math.min(h-1,cc.y1[k]+2), bw=x1-x0+1, bh=y1-y0+1;
+    const R=Math.max(med,rMin), pad=Math.ceil(R)+3, X0=Math.max(0,x0-pad), Y0=Math.max(0,y0-pad), X1=Math.min(w-1,x1+pad), Y1=Math.min(h-1,y1+pad), BW=X1-X0+1, BH=Y1-Y0+1;
+    // centre line: Zhang–Suen thinning of this component
+    const sk=new Uint8Array(BW*BH); for(let y=Y0;y<=Y1;y++) for(let x=X0;x<=X1;x++){ const i=y*w+x; if(cc.lab[i]===k) sk[(y-Y0)*BW+(x-X0)]=1; }
+    let changed=true, it=0; const del=[];
+    while(changed && it<200){ changed=false; it++;
+      for(let pass=0;pass<2;pass++){ del.length=0;
+        for(let y=1;y<BH-1;y++) for(let x=1;x<BW-1;x++){ const i=y*BW+x; if(!sk[i]) continue;
+          const P2=sk[i-BW],P3=sk[i-BW+1],P4=sk[i+1],P5=sk[i+BW+1],P6=sk[i+BW],P7=sk[i+BW-1],P8=sk[i-1],P9=sk[i-BW-1];
+          const B=P2+P3+P4+P5+P6+P7+P8+P9; if(B<2||B>6) continue;
+          const A=(!P2&&P3)+(!P3&&P4)+(!P4&&P5)+(!P5&&P6)+(!P6&&P7)+(!P7&&P8)+(!P8&&P9)+(!P9&&P2); if(A!==1) continue;
+          if(pass===0){ if(P2&&P4&&P6) continue; if(P4&&P6&&P8) continue; } else { if(P2&&P4&&P8) continue; if(P2&&P6&&P8) continue; }
+          del.push(i); }
+        if(del.length){ changed=true; for(const i of del) sk[i]=0; } } }
+    // draw the centre line back at one width, then soften the edge (blur and threshold) so it comes out smooth
+    const out=new Float32Array(BW*BH), Ri=Math.ceil(R), R2=R*R, disc=[]; for(let dy=-Ri;dy<=Ri;dy++) for(let dx=-Ri;dx<=Ri;dx++) if(dx*dx+dy*dy<=R2) disc.push(dy*BW+dx);
+    for(let y=0;y<BH;y++) for(let x=0;x<BW;x++){ const i=y*BW+x; if(!sk[i]) continue; if(x<Ri||y<Ri||x>=BW-Ri||y>=BH-Ri){ for(let dy=-Ri;dy<=Ri;dy++) for(let dx=-Ri;dx<=Ri;dx++){ if(dx*dx+dy*dy>R2) continue; const X=x+dx,Y=y+dy; if(X>=0&&Y>=0&&X<BW&&Y<BH) out[Y*BW+X]=1; } } else for(const d of disc) out[i+d]=1; }
+    const rad=Math.max(1,Math.round(R*0.6)); let a=out;
+    for(let pass=0;pass<2;pass++){ const t=new Float32Array(BW*BH), u=new Float32Array(BW*BH);
+      for(let y=0;y<BH;y++){ let acc=0; const o=y*BW; for(let x=-rad;x<BW;x++){ if(x+rad<BW) acc+=a[o+x+rad]; if(x-rad-1>=0) acc-=a[o+x-rad-1]; if(x>=0) t[o+x]=acc/(2*rad+1); } }
+      for(let x=0;x<BW;x++){ let acc=0; for(let y=-rad;y<BH;y++){ if(y+rad<BH) acc+=t[(y+rad)*BW+x]; if(y-rad-1>=0) acc-=t[(y-rad-1)*BW+x]; if(y>=0) u[y*BW+x]=acc/(2*rad+1); } }
+      a=u; }
+    for(let y=Y0;y<=Y1;y++) for(let x=X0;x<=X1;x++){ const i=y*w+x, j=(y-Y0)*BW+(x-X0); if(cc.lab[i]===k) m[i]=0; if(a[j]>=0.5) m[i]=1; }
+    done++; }
+  return done;
+}
 function thickenThin(m,w,h,r){
   if(!(r>=1)) return; const N=w*h, dt=chamfer(m,w,h), R=Math.ceil(r), disc=[];
   // specks and dust stay as they are (they are dropped later as too small); only real shapes get thickened
@@ -796,8 +837,11 @@ function doTrace(){
   S.clusters.forEach((c,k)=>{ if(c.bg) return; const key=gradKey(c,k); let g=groups.get(key); if(!g){ g={yarn:c.yarn,grad:c.grad||null,ks:[],count:0}; groups.set(key,g);} g.ks.push(k); g.count+=c.count; });
   const order=[...groups.values()].sort((a,b)=>b.count-a.count);
   const layerOf=new Int16Array(256).fill(-1); order.forEach((g,li)=>g.ks.forEach(k=>layerOf[k]=li));
-  const masks=order.map((g,li)=>{ const m=new Uint8Array(N); for(let i=0;i<N;i++){ const L=layerOf[S.idx[i]]; m[i]= S.build==="stacked"? (L>=li?1:0) : (L===li?1:0); } return m; });
   const lay=layout(), mmPerPx=lay.k||1, dpx=S.minDetail/mmPerPx;
+  // each colour's own pixels; thin strokes of even width (outlines, script, rules) are redrawn as one even line first
+  const own=order.map((g,li)=>{ const m=new Uint8Array(N); for(let i=0;i<N;i++) m[i]= layerOf[S.idx[i]]===li ? 1:0; return m; });
+  S.evenDbg=[]; if(!S.keepThin && window.EVEN_STROKES!==false) own.forEach(m=>S.evenDbg.push(evenStrokes(m,w,h,MIN_STROKE_MM/2/mmPerPx)));
+  const masks=own.map(m=>m.slice()); if(S.build==="stacked") for(let li=masks.length-2;li>=0;li--){ const a=masks[li], b=masks[li+1]; for(let i=0;i<N;i++) if(b[i]) a[i]=1; }
   // Designers never leave a stroke thinner than about 4-5 mm on the mat (it would not tuft): thin lines, hairline
   // rings and light lettering are thickened to the minimum; strokes already thicker are untouched.
   if(!S.keepThin) masks.forEach(m=>thickenThin(m,w,h,MIN_STROKE_MM/2/mmPerPx));
