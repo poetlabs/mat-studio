@@ -131,7 +131,7 @@ details[open] summary{margin-bottom:10px}
 
 <div class="wrap">
 <header class="top">
-  <h1>Logo Mat <span>Proof Studio</span> <small class="ver" title="Studio version and build date">v33 · 16 Nov 2026</small></h1>
+  <h1>Logo Mat <span>Proof Studio</span> <small class="ver" title="Studio version and build date">v34 · 16 Nov 2026</small></h1>
   <p>Drop the customer's logo, pick the mat style. It is redrawn as vectors, snapped to that style's yarn colours, placed on the mat, and packed as .ai + .wmf for upload.</p>
 </header>
 
@@ -2822,7 +2822,7 @@ function buildPDF(){
   const imgObj=img? add(`<< /Type /XObject /Subtype /Image /Width ${img.w} /Height ${img.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${img.bin.length} >>\nstream\n${img.bin}\nendstream`) : 0;
   const page=add(`<< /Type /Page /Parent ${pages} 0 R /MediaBox [0 0 ${num(Wp)} ${num(Hp)}] /Resources << /ColorSpace << /RGB [/ICCBased ${icc} 0 R] >> /Properties << ${ocgs.map((o,i)=>`/L${i} ${o} 0 R`).join(" ")} >>${shObjs.length?` /Shading << ${shObjs.map((o,i)=>`/Sh${i} ${o} 0 R`).join(" ")} >>`:""}${imgObj?` /XObject << /Im0 ${imgObj} 0 R >>`:""} >> /Contents ${content} 0 R >>`);
   objs[cat-1]=`<< /Type /Catalog /Pages ${pages} 0 R /OCProperties << /OCGs [${ocgs.map(o=>o+" 0 R").join(" ")}] /D << /Order [${ocgs.map(o=>o+" 0 R").join(" ")}] /ON [${ocgs.map(o=>o+" 0 R").join(" ")}] >> >> >>`; objs[pages-1]=`<< /Type /Pages /Kids [${page} 0 R] /Count 1 >>`;
-  const info=add(`<< /Title (${S.id.replace(/[()\\]/g,"")}) /Subject (${STYLES[S.style].label} ${S.w}x${S.h} cm) /Creator (Logo Mat Proof Studio) >>`);
+  const info=add(`<< /Title (${S.id.replace(/[()\\]/g,"")}) /Subject (${STYLES[S.style].label} ${S.w}x${S.h} cm) /Creator (Logo Mat Proof Studio ${(document.querySelector('.ver')||{}).textContent||''}) >>`);
   let out="%PDF-1.5\n%\xE2\xE3\xCF\xD3\n"; const offs=[];
   objs.forEach((o,i)=>{ offs.push(out.length); out+=`${i+1} 0 obj\n${o}\nendobj\n`; });
   const xref=out.length; out+=`xref\n0 ${objs.length+1}\n0000000000 65535 f \n`+offs.map(o=>String(o).padStart(10,"0")+" 00000 n \n").join("");
