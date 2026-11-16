@@ -83,7 +83,10 @@ function syncChips(){
   $("borderWWrap").hidden = !bd;
   const lg=(S.logoYarn==="auto"||S.logoYarn==="set")?null:yarnBy(p,S.logoYarn); $("logoChip").style.background=lg?lg.hex:"conic-gradient(#c33,#e93,#3a6,#36c,#c33)"; if(lg) lastHex.logo=lg.hex;
 }
-function applyLogoYarn(){ const p=pal();
+function applyLogoYarn(){ const p=pal(); applyLogoYarn0(); if(S.colourMap&&S.colourMap.length&&S.clusters.length){
+    for(const c of S.clusters){ if(c.bg) continue; const f=colourFamily(c.hex), m=S.colourMap.find(x=>x[0]===f); if(!m) continue;
+      const y= m[1]==="white"? extremeYarn(p,false) : m[1]==="black"? extremeYarn(p,true) : nearestYarn(p,rgbToLab(...hexToRgb(COLOUR_HEX[m[1]]))).yarn; c.yarn=y.label; c.de=de2000(c.lab,y.lab); c.mapped=true; } } }
+function applyLogoYarn0(){ const p=pal();
   if(S.logoYarn==="auto" && S.logoWord && S.clusters.length){ // the instructions name a plain colour: that colour of the artwork (its backdrop too), else the nearest yarn
     const fam=w=>w==="gold"?["gold","yellow"]:w==="blue"?["blue"]:[w];
     const c=[...S.clusters].filter(c=>fam(S.logoWord).includes(colourFamily(c.hex))).sort((a,b)=>b.count-a.count)[0];
@@ -1512,7 +1515,7 @@ function colourFamily(hex){ const [r,g,b]=hexToRgb(hex).map(v=>v/255), mx=Math.m
 const BG_WORDS=/(colou?r preference|preferred colou?r|mat colou?r|colou?r of the mat|couleur du tapis|farbe der matte|fond|background|\bbg\b|hintergrund|fondo|fundo|achtergrond|pozad|háttér|hatter|tło|tlo|sfondo|bakgrund|baggrund|tausta|grund)/i;
 const LOGO_WORDS=/(logo|texte?|text|schrift|lettering|letters|lettres|letras|lettere|writing|wording|[ée]criture|scritta|tekst|testo|texto|písmo|felirat|napis|szöveg)/i;
 function readSpecial(p,sp){
-  const res={bg:null, logo:[], shape:null, photo:false, keepAll:false, edgeCm:null, alignX:null, alignY:null, fill:false, neg:[], negWords:[], logoWord:null, notes:[]}; if(!sp) return res;
+  const res={bg:null, logo:[], shape:null, photo:false, keepAll:false, edgeCm:null, alignX:null, alignY:null, fill:false, neg:[], negWords:[], logoWord:null, colourMap:[], notes:[]}; if(!sp) return res;
   { const m=sp.match(/(\d+(?:[.,]\d+)?)\s*cm\s*(?:du|de|des|from(?: the)?|vom|van|dal|of(?: the)?)?\s*(?:bord|edge|border|rand|kant|bordo|margin|marge)/i) || sp.match(/(?:margin|marge|bord|edge|rand|abstand)\D{0,20}(\d+(?:[.,]\d+)?)\s*cm/i);
     if(m){ const v=parseFloat(m[1].replace(",",".")); if(v>0 && v<60){ res.edgeCm=v; res.notes.push("Margin "+v+" cm from the edge (from instructions)."); } } }
   { const SYN={noir:"black",schwarz:"black",negro:"black",nero:"black",zwart:"black",blanc:"white",weiss:"white","weiß":"white",blanco:"white",bianco:"white",wit:"white"};
@@ -1531,6 +1534,10 @@ function readSpecial(p,sp){
     else if(bgPos>=0){ res.bg=res.bg||codes[0].yarn; codes.slice(1).forEach(c=>res.logo.push(c.yarn)); }
     else codes.forEach(c=>res.logo.push(c.yarn)); }
   const t=sp.toLowerCase();
+  // "change all the black text to white" (Petrarca 5165620): one colour of the artwork becomes another
+  { const fam=w=>{ for(const [f,re] of COLOUR_WORDS) if(re.test(w)) return f; return null; };
+    for(const m of t.matchAll(/(?:change|make|turn|replace|switch|chang\w*|cambi\w*|ändern|umfärben|cambiar|mettre|passer|zet)\s+(?:all\s+|tout\w*\s+|the\s+|le\s+|les\s+|la\s+|il\s+|el\s+|los\s+|das\s+|die\s+)*([a-zà-ÿß]+)\s+(?:[a-zà-ÿß]+\s+){0,2}?(?:to|into|in|en|a|zu|naar)\s+([a-zà-ÿß]+)/g)){
+      const a=fam(m[1]), b=fam(m[2]); if(a && b && a!==b){ res.colourMap.push([a,b]); res.notes.push("Logo "+a+" changed to "+b+" (from instructions)."); } } }
   // "use the blue in text and logo": a plain colour word for the logo, matched later to that colour in the artwork (Nord Anglia 5159147)
   if(!res.logo.length){ for(const cl of clauses){ if(!LOGO_WORDS.test(cl)) continue; const lc=cl.toLowerCase();
       for(const [fam,re] of COLOUR_WORDS){ const m=lc.match(re); if(!m) continue; const before=lc.slice(Math.max(0,m.index-18),m.index);
@@ -1562,7 +1569,7 @@ function fillFromOrder(txt){
   const num=v=>parseFloat(String(v).replace(",","."));
   const done=[], missed=[];
   // every order starts from a clean slate
-  S.edgeCm=null; S.alignX=null; S.alignY=null; S.fill=false; S.logoWord=null; S.innerPanel=null; S.bgLocked=false; S.bgSrc=null; S.bgOrder=null; S.photoReq=false; S.photoUser=false; S.logoSet=[]; S.logoYarn="auto"; S.photo=false; S.keepAll=false; S.orderNotes=[]; S.corner="square"; $("corner").value="square";
+  S.edgeCm=null; S.alignX=null; S.alignY=null; S.fill=false; S.logoWord=null; S.colourMap=[]; S.innerPanel=null; S.bgLocked=false; S.bgSrc=null; S.bgOrder=null; S.photoReq=false; S.photoUser=false; S.logoSet=[]; S.logoYarn="auto"; S.photo=false; S.keepAll=false; S.orderNotes=[]; S.corner="square"; $("corner").value="square";
   S.minDetail=3; $("minDetail").value=3; const ph0=$("photoMode"); if(ph0) ph0.checked=false;
   const id=(txt.match(/Design Number\s*:?\s*(\d{4,})/i)||txt.match(/Design Number[\s\S]{0,60}?\b(\d{6,8})\b/i)||[])[1]; if(id){ S.id=id; $("designId").value=id; done.push("design "+id); } else missed.push("design ID");
   const prod=(txt.match(/^[ \t]*\d+\s*-\s*(.*(?:impression|colou?r\s*star|promo|scrape).*)$/im)||[])[1]||"";
@@ -1596,7 +1603,7 @@ function fillFromOrder(txt){
     if(set.length===1){ S.logoYarn=set[0]; S.logoSet=[]; } else if(set.length>1){ S.logoSet=set; S.logoYarn="set"; }
     notes.push("logo "+set.join(" + ")+" (from instructions)"); }
   if(SP.edgeCm) S.edgeCm=SP.edgeCm;
-  S.alignX=SP.alignX; S.alignY=SP.alignY; S.fill=SP.fill; S.logoWord=SP.logoWord; if(SP.logoWord){ S.orderLogo=true; notes.push("logo "+SP.logoWord); } if(SP.fill) notes.push("logo fills the mat"); if(SP.logo.length) S.orderLogo=true; if(SP.alignX||SP.alignY) notes.push("logo "+[SP.alignY,SP.alignX].filter(Boolean).join(" "));
+  S.alignX=SP.alignX; S.alignY=SP.alignY; S.fill=SP.fill; S.logoWord=SP.logoWord; S.colourMap=SP.colourMap; if(SP.logoWord){ S.orderLogo=true; notes.push("logo "+SP.logoWord); } if(SP.fill) notes.push("logo fills the mat"); if(SP.logo.length) S.orderLogo=true; if(SP.alignX||SP.alignY) notes.push("logo "+[SP.alignY,SP.alignX].filter(Boolean).join(" "));
   if(SP.shape){ S.corner=SP.shape; $("corner").value=SP.shape; notes.push(SP.shape+" mat"); }
   if(SP.photo){ S.photoReq=true; notes.push("photo-realistic artwork requested"); }
   if(SP.keepAll){ S.keepAll=true; S.minDetail=1; $("minDetail").value=1; notes.push("keep all small details"); }
