@@ -131,7 +131,7 @@ details[open] summary{margin-bottom:10px}
 
 <div class="wrap">
 <header class="top">
-  <h1>Logo Mat <span>Proof Studio</span> <small class="ver" title="Studio version and build date">v31 · 12 Nov 2026</small></h1>
+  <h1>Logo Mat <span>Proof Studio</span> <small class="ver" title="Studio version and build date">v32 · 16 Nov 2026</small></h1>
   <p>Drop the customer's logo, pick the mat style. It is redrawn as vectors, snapped to that style's yarn colours, placed on the mat, and packed as .ai + .wmf for upload.</p>
 </header>
 
@@ -1835,8 +1835,19 @@ async function renderPdfPage(doc,pageNo){
   const c=document.createElement("canvas"); c.width=Math.ceil(vp.width); c.height=Math.ceil(vp.height);
   // A page that carries a picture (a scan or a printed screenshot) is read on white paper, the way it looks in any viewer;
   // a vector logo keeps its transparent page so white lettering stays visible.
-  let hasImage=false; try{ const ops=await page.getOperatorList(), O=pdfjsLib.OPS; hasImage=ops.fnArray.some(f=>f===O.paintImageXObject||f===O.paintJpegXObject||f===O.paintInlineImageXObject||f===O.paintImageXObjectRepeat); }catch(e){}
-  await page.render({canvasContext:c.getContext("2d"),viewport:vp,background:hasImage?"rgba(255,255,255,1)":"rgba(0,0,0,0)"}).promise;
+  let hasImage=false, vecOps=0; try{ const ops=await page.getOperatorList(), O=pdfjsLib.OPS; hasImage=ops.fnArray.some(f=>f===O.paintImageXObject||f===O.paintJpegXObject||f===O.paintInlineImageXObject||f===O.paintImageXObjectRepeat);
+    vecOps=ops.fnArray.filter(f=>f===O.constructPath||f===O.showText||f===O.showSpacedText).length; }catch(e){}
+  const bgFill=hasImage?"rgba(255,255,255,1)":"rgba(0,0,0,0)";
+  await page.render({canvasContext:c.getContext("2d"),viewport:vp,background:bgFill}).promise;
+  // A small logo on a big page (a photo of the logo placed on an A4 sheet, Café Antiguo 5165065) is mostly empty paper:
+  // the logo's colours get lost among the page colours. Render just the part with content, at full resolution.
+  try{ const g=c.getContext("2d"), d=g.getImageData(0,0,c.width,c.height).data; let x0=c.width,y0=c.height,x1=-1,y1=-1;
+    for(let y=0;y<c.height;y+=2) for(let x=0;x<c.width;x+=2){ const i=(y*c.width+x)*4; const ink= hasImage? (d[i+3]>0 && (765-d[i]-d[i+1]-d[i+2])>24) : d[i+3]>24; if(ink){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; } }
+    if(x1>x0 && y1>y0 && (x1-x0)*(y1-y0) < 0.6*c.width*c.height){ const m=Math.round(0.02*Math.max(x1-x0,y1-y0)); x0=Math.max(0,x0-m); y0=Math.max(0,y0-m); x1=Math.min(c.width,x1+m); y1=Math.min(c.height,y1+m);
+      const k=Math.min(12/sc, RENDER_LONG/Math.max(x1-x0,y1-y0)), sc2=sc*k, vp2=page.getViewport({scale:sc2, offsetX:-x0*k, offsetY:-y0*k});
+      const c2=document.createElement("canvas"); c2.width=Math.ceil((x1-x0)*k); c2.height=Math.ceil((y1-y0)*k);
+      await page.render({canvasContext:c2.getContext("2d"),viewport:vp2,background:bgFill}).promise; c2.imageOnly=hasImage&&vecOps<4; return c2; } }catch(e){}
+  c.imageOnly=hasImage&&vecOps<4;
   return c;
 }
 async function renderSvg(blob){
@@ -2362,6 +2373,8 @@ function decideBg(){ const p=pal(); S.bgNote="";
 }
 /* A logo colour that would vanish into the mat (black text on a black mat) switches to white or black. */
 function contrastSwap(){ const p=pal(), bg=yarnBy(p,S.innerPanel||S.bg); if(!bg) return; S.swapped=[];
+  // the customer's own artwork already shows the logo on this mat colour (black ship on dark grey, El Galeón 5159724): keep it
+  { const page=S.clusters.find(c=>c.bg&&!c.panel); if(page && !S.innerPanel && de2000(page.lab,bg.lab)<12) return; }
   const orderCols=(S.logoYarn==="set"?S.logoSet:S.logoYarn!=="auto"?[S.logoYarn]:[]).map(l=>yarnBy(p,l)).filter(y=>y && de2000(y.lab,bg.lab)>=10);
   for(const c of S.clusters){ if(c.bg||(c.hole&&c.yarn===S.bg&&!S.innerPanel)) continue; const y=yarnBy(p,c.yarn); if(!y) continue;
     // also grey on a near-black (or near-white) mat of almost the same lightness: dark grey crest on black (Freemen's 5157281)
@@ -2506,7 +2519,7 @@ function doTrace(){
   // enlarged low-res artwork: one source pixel is several work pixels, so JPEG ripples along edges are that big too;
   // fitting tolerances grow with the enlargement so straight edges come out straight (Ressos 5157439)
   const fitScale=Math.min(window.FIT_SCALE_MAX||5, Math.max(window.FIT_BASE||1, 1+(window.FIT_SCALE_K||1.0)*((S.upscale||1)-1))); // JPEG ripples on curves: designers want smooth arcs (METRO 5159552)
-  const fit={round:S.roundMM>0? S.roundMM/mmPerPx : 0, tol:(0.45+S.smooth*0.15)*fitScale, lineTol:0.6*fitScale, lineBias:0.06, minLine:Math.max(Math.round(14*rs),Math.round(6/mmPerPx)), trim:Math.round(3*rs), k:Math.round(4*rs), cornerAngle:1.0, cornerCut:1.2*rs, capAngle:1.75, keepAngle:0.9, capLen:S.roundMM>0? 2.6*S.roundMM/mmPerPx : 0, smoothPasses:Math.round(4*rs*(window.SMOOTH_K||1)), sharp:(S.upscale||1)<=(window.SHARP_UP||2.6)};
+  const fit={round:S.roundMM>0? S.roundMM/mmPerPx : 0, tol:(0.45+S.smooth*0.15)*fitScale, lineTol:0.6*fitScale, lineBias:0.06, minLine:Math.max(Math.round(14*rs),Math.round(6/mmPerPx)), trim:Math.round(3*rs), k:Math.round(4*rs), cornerAngle:1.0, cornerCut:1.2*rs, capAngle:1.75, keepAngle:0.9, capLen:S.roundMM>0? 2.6*S.roundMM/mmPerPx : 0, smoothPasses:Math.round(4*rs*(window.SMOOTH_K||1)), sharp:(S.upscale||1)<=(window.SHARP_UP||4)};
   S.pendingOrder=order; S.traceJob++; busy("Tracing "+order.length+" colour layer"+(order.length===1?"":"s")+"…");
   if(!order.length){ S.layers=[]; busy(null); render(); updateSpec(); return; }
   getWorker().postMessage({job:S.traceJob,w,h,masks,opts,fit});
@@ -2993,13 +3006,19 @@ async function useOrder(o){
   const PROOF=/approv|proof|visual|mock-?up|quotation|invoice|\bform\b/i, arts=o.artwork.filter(x=>!PROOF.test(x.name)), pool=arts.length?arts:o.artwork;
   if(arts.length<o.artwork.length) toast("Skipped "+(o.artwork.length-arts.length)+" approval/proof file(s); use Load to pick one.");
   let a=pool[0]; for(const re of ART_PREF){ const m=pool.find(x=>re.test(x.name)); if(m){ a=m; break; } }
-  const vec=pool.find(x=>/\.(pdf|ai|svg)$/i.test(x.name)); if(vec) a=vec;
+  let vec=pool.find(x=>/\.(pdf|ai|svg)$/i.test(x.name)); if(vec) a=vec;
   if(!apiOk){ lookupMsg("Order filled. Download the artwork with “Original” and drop it in."); return; }
-  if(!vec && pool.length>1){ // several pictures: use the sharpest (most pixels), like the designers pick the best file
+  // A PDF that only holds a picture (a photo of the old mat, "Felpudo.pdf" 5159710; a photo of the logo, 5165065) is not
+  // vector artwork: it competes with the other files like any picture.
+  let pdfPic=null;
+  if(vec && /\.pdf$/i.test(vec.name) && pool.length>1){ try{ busy("Checking "+vec.name+"…"); const r=await fetch("api/file?u="+encodeURIComponent(vec.url)); const b=await r.blob(); const lib=await getPdfjs();
+      const doc=await lib.getDocument({data:new Uint8Array(await b.arrayBuffer()),isEvalSupported:false}).promise; const cv=await renderPdfPage(doc,1);
+      if(cv.imageOnly){ pdfPic={x:vec, b:await new Promise(res=>cv.toBlob(res,"image/png"))}; vec=null; } }catch(e){} busy(null); }
+  if(!vec && pool.length>1){ // several pictures: use the best one (clean logo files first, then the sharpest), like the designers pick the best file
     busy("Comparing "+pool.length+" artwork files…"); let best=null,bs=-1;
-    for(const x of pool){ try{ const r=await fetch("api/file?u="+encodeURIComponent(x.url)); if(!r.ok) continue; const b=await r.blob();
+    for(const x of pool){ try{ let b; if(pdfPic && x===pdfPic.x) b=pdfPic.b; else { if(/\.(pdf|ai|svg)$/i.test(x.name)) continue; const r=await fetch("api/file?u="+encodeURIComponent(x.url)); if(!r.ok) continue; b=await r.blob(); }
       const sc=await artScore(b); if(sc.score>bs){ bs=sc.score; best={x,b,sc}; } }catch(e){} }
-    busy(null); if(best){ lookupMsg(pool.length+" artwork files: using "+best.x.name+" ("+best.sc.w+" × "+best.sc.h+" px, "+(best.sc.flat>=0.75?"clean logo":"photo-like")+"). Use Load to pick another."); await loadFromBlob(best.b,best.x.name); return; } }
+    busy(null); if(best){ lookupMsg(pool.length+" artwork files: using "+best.x.name+" ("+best.sc.w+" × "+best.sc.h+" px, "+(best.sc.flat>=0.75?"clean logo":"photo-like")+"). Use Load to pick another."); await loadFromBlob(best.b, best.x===(pdfPic&&pdfPic.x)? best.x.name.replace(/\.pdf$/i,".png") : best.x.name); return; } }
   await loadArtwork(a);
 }
 function hasBookmark(){ try{ return localStorage.getItem("matstudio.bm")==="1"; }catch(e){ return false; } }
@@ -3180,7 +3199,7 @@ function findCodes(p,text){
     let y=null; if(/pantone\s*[^a-z0-9]?$/i.test(text.slice(Math.max(0,m.index-10),m.index+1))) continue; // "Pantone 116 C" is not yarn 116
     if(m[2]){ y=byCode.get(m[2].toUpperCase()+"|"+(+m[3])); }
     else { const cand=byCode.get("|"+(+m[5])); if(cand){ const after=text.slice(m.index+m[0].length, m.index+m[0].length+24).toLowerCase(), before=text.slice(Math.max(0,m.index-24), m.index).toLowerCase();
-        if(after.trim().startsWith(cand.name.toLowerCase().split(" ")[0]) || /colou?r|couleur|farbe|kleur|color|fond|logo|texte?/.test(before)) y=cand; } }
+        if(after.trim().startsWith(cand.name.toLowerCase().split(" ")[0]) || /colou?r|couleur|farbe|kleur|color|fond|logo|texte?|[ée]criture|lettres|letras|writing|schrift|cod\.?|code/.test(before)) y=cand; } }
     if(y && !seen.has(y.label)){ seen.add(y.label); out.push({yarn:y, at:m.index}); }
   }
   // yarns written by name ("cool anthracite" = F03 Cool Anthracite); the longest name wins, so "anthracite" alone
@@ -3207,7 +3226,7 @@ function colourFamily(hex){ const [r,g,b]=hexToRgb(hex).map(v=>v/255), mx=Math.m
   let h= d===0?0 : mx===r? 60*(((g-b)/d)%6) : mx===g? 60*((b-r)/d+2) : 60*((r-g)/d+4); if(h<0) h+=360;
   if(h<15||h>=345) return mx<0.45?"brown":"red"; if(h<40) return mx<0.55?"brown":"orange"; if(h<65) return mx<0.75&&sat<0.75?"gold":"yellow"; if(h<170) return "green"; if(h<260) return "blue"; if(h<300) return "purple"; return "pink"; }
 const BG_WORDS=/(colou?r preference|preferred colou?r|mat colou?r|colou?r of the mat|couleur du tapis|farbe der matte|fond|background|\bbg\b|hintergrund|fondo|fundo|achtergrond|pozad|háttér|hatter|tło|tlo|sfondo|bakgrund|baggrund|tausta|grund)/i;
-const LOGO_WORDS=/(logo|texte?|text|schrift|lettering|letters|tekst|testo|texto|písmo|felirat|napis|szöveg)/i;
+const LOGO_WORDS=/(logo|texte?|text|schrift|lettering|letters|lettres|letras|lettere|writing|wording|[ée]criture|scritta|tekst|testo|texto|písmo|felirat|napis|szöveg)/i;
 function readSpecial(p,sp){
   const res={bg:null, logo:[], shape:null, photo:false, keepAll:false, edgeCm:null, alignX:null, alignY:null, fill:false, neg:[], negWords:[], logoWord:null, notes:[]}; if(!sp) return res;
   { const m=sp.match(/(\d+(?:[.,]\d+)?)\s*cm\s*(?:du|de|des|from(?: the)?|vom|van|dal|of(?: the)?)?\s*(?:bord|edge|border|rand|kant|bordo|margin|marge)/i) || sp.match(/(?:margin|marge|bord|edge|rand|abstand)\D{0,20}(\d+(?:[.,]\d+)?)\s*cm/i);
