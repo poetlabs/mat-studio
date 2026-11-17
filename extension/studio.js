@@ -379,6 +379,17 @@ function analyze(){
   // Artwork drawn in the page colour on the panel (an outline frame, lettering) is logo, not background.
   if(panelC>=0 && S.bgConn){ const nk=cents.length; let moved=0; for(let i=0;i<N;i++) if(idx[i]===bgC && !S.bgConn[i]){ idx[i]=nk; moved++; }
     if(moved){ cents.push({lab:cents[bgC].lab.slice()}); cnt=new Float64Array(cents.length); trN=0; for(let i=0;i<N;i++){ const v=idx[i]; if(v===TR){trN++; continue;} cnt[v]++; } } }
+  // A solid card or oval behind the lettering in a colour the order does not ask for (Chryso Stachy 5165954: brown oval with
+  // a gold rim and gold script, order: logo C11 Gold on C06 Black). The designer drops the fill: the mat shows through,
+  // the rim and lettering stay. Kept when the order names that colour, or names no logo colour (round badges stay solid).
+  if(bgC>=0 && S.orderLogo && !S.cleanup){ const pl=pal(), ys=(S.logoYarn==="set"?S.logoSet:[S.logoYarn]).map(l=>yarnBy(pl,l)).filter(Boolean);
+    if(ys.length){ const K=cents.length, skip=k=>k===bgC||k===panelC; let rest=0; for(let i=0;i<N;i++){ const v=idx[i]; if(v!==TR && !skip(v)) rest++; }
+      let card=-1;
+      for(let k=0;k<K;k++){ if(skip(k) || cnt[k]<0.4*rest) continue; if(ys.some(y=>de2000(y.lab,cents[k].lab)<15)) continue;
+        let x0=w,y0=h,x1=-1,y1=-1; for(let y=0;y<h;y++) for(let x=0;x<w;x++) if(idx[y*w+x]===k){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+        const A=(x1-x0+1)*(y1-y0+1); let inBox=0, solid=0; for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){ const v=idx[y*w+x]; if(v===TR||skip(v)) continue; inBox++; }
+        if(inBox>=0.9*rest && inBox>=0.72*A && cnt[k]>=0.4*A){ card=k; break; } }
+      if(card>=0){ for(let i=0;i<N;i++) if(idx[i]===card) idx[i]=bgC; cnt[bgC]+=cnt[card]; cnt[card]=0; S.cardDropped=labHex(cents[card].lab); } } }
   const p=pal();
   S.clusters=cents.map((c,k)=>{ const m=nearestYarn(p,c.lab); return {lab:c.lab, hex:labHex(c.lab), count:cnt[k], yarn:m.yarn.label, de:m.de, bg:k===bgC||k===panelC, panel:k===panelC, grad:c.grad||null}; });
   separateYarns(); applyLogoYarn(); decideBg(); decidePanel(); fillYarnSelects();
@@ -448,7 +459,9 @@ function evenStrokes(m,w,h,rMin){
       for(let y=0;y<BH;y++){ let acc=0; const o=y*BW; for(let x=-rad;x<BW;x++){ if(x+rad<BW) acc+=a[o+x+rad]; if(x-rad-1>=0) acc-=a[o+x-rad-1]; if(x>=0) t[o+x]=acc/(2*rad+1); } }
       for(let x=0;x<BW;x++){ let acc=0; for(let y=-rad;y<BH;y++){ if(y+rad<BH) acc+=t[(y+rad)*BW+x]; if(y-rad-1>=0) acc-=t[(y-rad-1)*BW+x]; if(y>=0) u[y*BW+x]=acc/(2*rad+1); } }
       a=u; }
-    for(let y=Y0;y<=Y1;y++) for(let x=X0;x<=X1;x++){ const i=y*w+x, j=(y-Y0)*BW+(x-X0); if(cc.lab[i]===k) m[i]=0; if(a[j]>=0.5) m[i]=1; }
+    // keep parts of the old shape that the new line misses by more than a ripple (corners, spurs), so no gaps open up
+    const nm=new Uint8Array(BW*BH); for(let j=0;j<BW*BH;j++) nm[j]=a[j]>=0.5?0:1; const far=chamfer(nm,BW,BH);
+    for(let y=Y0;y<=Y1;y++) for(let x=X0;x<=X1;x++){ const i=y*w+x, j=(y-Y0)*BW+(x-X0); const old=cc.lab[i]===k; if(old) m[i]=0; if(a[j]>=0.5 || (old && far[j]>=2.5)) m[i]=1; }
     done++; }
   return done;
 }
