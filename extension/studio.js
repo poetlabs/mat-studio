@@ -96,7 +96,8 @@ function applyLogoYarn0(){ const p=pal();
     // several order colours: each logo colour goes to the closest of the colours the order asks for
     // a page-coloured pocket kept inside an emblem (the white inside a red hexagon outline) stays the mat colour when the mat is that colour
     const mat=yarnBy(p,S.bg), page=S.clusters.find(c=>c.bg&&!c.panel);
-    for(const c of S.clusters) if(!c.bg){ c.hole=false; let b=ys[0],bd=1e9; for(const y of ys){ const d=de2000(c.lab,y.lab); if(d<bd){bd=d;b=y;} }
+    for(const c of S.clusters) if(!c.bg){ c.hole=false; let b=ys[0],bd=1e9; const neu=chromaOf(c.lab)<12, same=ys.filter(y=>(chromaOf(y.lab)<12)===neu), pool=same.length?same:ys; // dark grey text goes to the order's white, not its orange (Koronidis 5166599)
+      for(const y of pool){ const d=de2000(c.lab,y.lab); if(d<bd){bd=d;b=y;} }
       const dm=mat&&page&&S.bgSrc&&de2000(c.lab,page.lab)<10? de2000(c.lab,mat.lab) : 1e9; if(dm<10 && dm<bd){ c.yarn=mat.label; c.de=dm; c.hole=true; continue; }
       c.yarn=b.label; c.de=bd; } return; }
   if(S.logoYarn==="auto") return; const y=yarnBy(p,S.logoYarn); if(!y) return;
@@ -242,7 +243,8 @@ function analyze(){
   if(samples.length<50){ for(let t=0;t<4000;t++){ const p=Math.floor(rand()*N)*4; if(data[p+3]>=128) samples.push(rgbToLab(data[p],data[p+1],data[p+2])); } }
   const K = S.k==="auto"? 8 : +S.k, nFlat=samples.length; // nFlat: the flat samples (later additions are edge/detail pixels)
   let cents=kmeans(samples,K,rand);
-  if(S.k==="auto") cents=mergeClose(cents, samples.length);
+  if(S.k==="auto"){ const dom=Math.max(...cents.map(c=>c.n)); // a small logo on a big page: judge "small colour" against the logo, not the page (La Salvetat 5166001 teal and red)
+    cents=mergeClose(cents, dom>0.7*samples.length? Math.max(1,samples.length-dom) : samples.length); }
   if(cents.length<2){ // thin artwork (fine lettering) can lack flat samples: look for any clearly different pixels
     const c0=cents[0].lab, far=[]; for(let t=0;t<200000 && far.length<6000;t++){ const p=Math.floor(rand()*N)*4; if(data[p+3]<128) continue; const l=rgbToLab(data[p],data[p+1],data[p+2]); if((l[0]-c0[0])**2+(l[1]-c0[1])**2+(l[2]-c0[2])**2>900) far.push(l); }
     if(far.length>=30){ // keep the core of the strokes, not their anti-aliased edges: the most distant half
@@ -382,14 +384,31 @@ function analyze(){
   // A solid card or oval behind the lettering in a colour the order does not ask for (Chryso Stachy 5165954: brown oval with
   // a gold rim and gold script, order: logo C11 Gold on C06 Black). The designer drops the fill: the mat shows through,
   // the rim and lettering stay. Kept when the order names that colour, or names no logo colour (round badges stay solid).
-  if(bgC>=0 && S.orderLogo && !S.cleanup){ const pl=pal(), ys=(S.logoYarn==="set"?S.logoSet:[S.logoYarn]).map(l=>yarnBy(pl,l)).filter(Boolean);
-    if(ys.length){ const K=cents.length, skip=k=>k===bgC||k===panelC; let rest=0; for(let i=0;i<N;i++){ const v=idx[i]; if(v!==TR && !skip(v)) rest++; }
-      let card=-1;
-      for(let k=0;k<K;k++){ if(skip(k) || cnt[k]<0.4*rest) continue; if(ys.some(y=>de2000(y.lab,cents[k].lab)<15)) continue;
-        let x0=w,y0=h,x1=-1,y1=-1; for(let y=0;y<h;y++) for(let x=0;x<w;x++) if(idx[y*w+x]===k){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
-        const A=(x1-x0+1)*(y1-y0+1); let inBox=0, solid=0; for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){ const v=idx[y*w+x]; if(v===TR||skip(v)) continue; inBox++; }
-        if(inBox>=0.9*rest && inBox>=0.72*A && cnt[k]>=0.4*A){ card=k; break; } }
-      if(card>=0){ for(let i=0;i<N;i++) if(idx[i]===card) idx[i]=bgC; cnt[bgC]+=cnt[card]; cnt[card]=0; S.cardDropped=labHex(cents[card].lab); } } }
+  // Also a card in the mat's own colour (Daily Grinds 5166262: beige disc, mat 120 Sandalwood, black lettering): it is the mat.
+  if(!S.cleanup && (S.orderLogo || S.bgOrder)){ const pl=pal(), ys=(S.orderLogo?(S.logoYarn==="set"?S.logoSet:[S.logoYarn]):[]).map(l=>yarnBy(pl,l)).filter(Boolean), matY=S.bgOrder?yarnBy(pl,S.bgOrder):null;
+    const DROP= bgC>=0? bgC : TR, K=cents.length, skip=k=>k===bgC||k===panelC; let rest=0; for(let i=0;i<N;i++){ const v=idx[i]; if(v!==TR && !skip(v)) rest++; }
+    let card=-1;
+    for(let k=0;k<K;k++){ if(skip(k) || cnt[k]<0.4*rest) continue; if(ys.some(y=>de2000(y.lab,cents[k].lab)<15)) continue; if(!ys.length && !(matY && de2000(matY.lab,cents[k].lab)<15)) continue;
+      let x0=w,y0=h,x1=-1,y1=-1; for(let y=0;y<h;y++) for(let x=0;x<w;x++) if(idx[y*w+x]===k){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+      const A=(x1-x0+1)*(y1-y0+1); let inBox=0; for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){ const v=idx[y*w+x]; if(v===TR||skip(v)) continue; inBox++; }
+      if(inBox>=0.9*rest && inBox>=0.72*A && cnt[k]>=0.4*A){ card=k; break; } }
+    if(card>=0){ for(let i=0;i<N;i++) if(idx[i]===card) idx[i]=DROP; if(DROP!==TR) cnt[DROP]+=cnt[card]; else trN+=cnt[card]; cnt[card]=0; S.cardDropped=labHex(cents[card].lab); } }
+  // Screenshots carry phone/browser chrome (status bar, tab titles, a chevron in the corner) far from the logo near the
+  // picture edge (La Salvetat 5166001). Small groups like that are dropped; details close to the logo stay.
+  S.chromeDropped=0; S.cardDropped=null;
+  if(!S.cleanup && !S.keepAll){ const DROP= bgC>=0? bgC : TR, isL=i=>{ const v=idx[i]; return v!==TR && v!==bgC && v!==panelC; };
+    const M=Math.max(w,h), d=Math.max(2,Math.round(0.012*M)), lm=new Uint8Array(N); for(let i=0;i<N;i++) lm[i]=isL(i)?1:0;
+    const grown=morph(lm,w,h,true,d), gc=components(w,h,i=>grown[i]===1,()=>true);
+    if(gc.n>1){ const cntG=new Float64Array(gc.n+1); for(let i=0;i<N;i++) if(lm[i]) cntG[gc.lab[i]]++;
+      let G=1; for(let g=2;g<=gc.n;g++) if(cntG[g]>cntG[G]) G=g;
+      const gap=(a,b)=>Math.max(0, gc.x0[b]-gc.x1[a], gc.x0[a]-gc.x1[b], gc.y0[b]-gc.y1[a], gc.y0[a]-gc.y1[b]), edge=0.08*M;
+      // the logo = the largest group plus everything within reach of it, step by step (PACE → HIRE → its rules)
+      const kept=new Uint8Array(gc.n+1); kept[G]=1; let grew=true;
+      while(grew){ grew=false; for(let g=1;g<=gc.n;g++){ if(kept[g]||!cntG[g]) continue; for(let k=1;k<=gc.n;k++) if(kept[k] && (gap(g,k)<=0.08*M || cntG[g]>=0.03*cntG[G])){ kept[g]=1; grew=true; break; } } }
+      const drop=new Uint8Array(gc.n+1); let nd=0;
+      for(let g=1;g<=gc.n;g++){ if(kept[g] || !cntG[g]) continue; const nearEdge= gc.x0[g]<edge || gc.y0[g]<edge || gc.x1[g]>w-1-edge || gc.y1[g]>h-1-edge;
+        if(nearEdge){ drop[g]=1; nd++; } }
+      if(nd){ for(let i=0;i<N;i++) if(lm[i] && drop[gc.lab[i]]){ const v=idx[i]; idx[i]=DROP; cnt[v]--; if(DROP!==TR) cnt[DROP]++; else trN++; } S.chromeDropped=nd; } } }
   const p=pal();
   S.clusters=cents.map((c,k)=>{ const m=nearestYarn(p,c.lab); return {lab:c.lab, hex:labHex(c.lab), count:cnt[k], yarn:m.yarn.label, de:m.de, bg:k===bgC||k===panelC, panel:k===panelC, grad:c.grad||null}; });
   separateYarns(); applyLogoYarn(); decideBg(); decidePanel(); fillYarnSelects();
@@ -1569,7 +1588,7 @@ function colourFamily(hex){ const [r,g,b]=hexToRgb(hex).map(v=>v/255), mx=Math.m
   if(sat<0.22) return mx>0.85?"white": mx<0.2?"black":"grey";
   let h= d===0?0 : mx===r? 60*(((g-b)/d)%6) : mx===g? 60*((b-r)/d+2) : 60*((r-g)/d+4); if(h<0) h+=360;
   if(h<15||h>=345) return mx<0.45?"brown":"red"; if(h<40) return mx<0.55?"brown":"orange"; if(h<65) return mx<0.75&&sat<0.75?"gold":"yellow"; if(h<170) return "green"; if(h<260) return "blue"; if(h<300) return "purple"; return "pink"; }
-const BG_WORDS=/(colou?r preference|preferred colou?r|mat colou?r|colou?r of the mat|couleur du tapis|farbe der matte|fond|background|\bbg\b|hintergrund|fondo|fundo|achtergrond|pozad|háttér|hatter|tło|tlo|sfondo|bakgrund|baggrund|tausta|grund)/i;
+const BG_WORDS=/(\bmatt?\b(?!\s*(?:size|dimension))|\btapis\b|\bfelpudo\b|\balfombra\b|\bteppich\b|\bzerbino\b|colou?r preference|preferred colou?r|mat colou?r|colou?r of the mat|couleur du tapis|farbe der matte|fond|background|\bbg\b|hintergrund|fondo|fundo|achtergrond|pozad|háttér|hatter|tło|tlo|sfondo|bakgrund|baggrund|tausta|grund)/i;
 const LOGO_WORDS=/(logo|texte?|text|schrift|lettering|letters|lettres|letras|lettere|writing|wording|[ée]criture|scritta|tekst|testo|texto|písmo|felirat|napis|szöveg)/i;
 function readSpecial(p,sp){
   const res={bg:null, logo:[], shape:null, photo:false, keepAll:false, edgeCm:null, alignX:null, alignY:null, fill:false, neg:[], negWords:[], logoWord:null, colourMap:[], notes:[]}; if(!sp) return res;
@@ -1584,9 +1603,11 @@ function readSpecial(p,sp){
     const all=findCodes(p,cl), codes=all.filter(c=>{ const i=posOf(c); const neg=NEG.test(cl.slice(Math.max(0,i-18),i)); if(neg) res.neg.push(c.yarn.label); return !neg; }); if(!codes.length) continue;
     const bgPos=cl.search(BG_WORDS), lgPos=cl.search(LOGO_WORDS);
     if(bgPos>=0 && lgPos>=0){ // both named: each colour belongs to the word right after it ("grey on a light ash background") or else the last word before it
-      const kw=[]; for(const [re,t] of [[new RegExp(BG_WORDS.source,"gi"),"bg"],[new RegExp(LOGO_WORDS.source,"gi"),"logo"]]){ let m; while((m=re.exec(cl))) kw.push({at:m.index,t}); }
+      const kw=[]; for(const [re,t] of [[new RegExp(BG_WORDS.source,"gi"),"bg"],[new RegExp(LOGO_WORDS.source,"gi"),"logo"]]){ let m; while((m=re.exec(cl))) kw.push({at:m.index,t,end:m.index+m[0].length}); }
       kw.sort((a,b)=>a.at-b.at);
-      for(const c of codes){ const nx=kw.find(k=>k.at>c.at && k.at-c.at<30 && !/[,;:]/.test(cl.slice(c.at,k.at)) && !codes.some(o=>o!==c && o.at>c.at && o.at<k.at)), pv=[...kw].reverse().find(k=>k.at<c.at), t=(nx||pv||{t:"logo"}).t;
+      for(const c of codes){ const pv0=[...kw].reverse().find(k=>k.at<c.at); // "Matt in C34", "fond: c11": a colour right after its word belongs to that word
+        if(pv0 && /^\s*(?:in|en|im|in der|de|del|di|à|a|auf|=|:|-|–)?\s*(?:the\s+|le\s+|la\s+)?(?:colou?r\s+|couleur\s+|farbe\s+)?$/i.test(cl.slice(pv0.end,c.at))){ if(pv0.t==="bg" && !res.bg) res.bg=c.yarn; else res.logo.push(c.yarn); continue; }
+        const nx=kw.find(k=>k.at>c.at && k.at-c.at<30 && !/[,;:]/.test(cl.slice(c.at,k.at)) && !codes.some(o=>o!==c && o.at>c.at && o.at<k.at)), pv=[...kw].reverse().find(k=>k.at<c.at), t=(nx||pv||{t:"logo"}).t;
         if(t==="bg" && !res.bg) res.bg=c.yarn; else res.logo.push(c.yarn); } }
     else if(bgPos>=0){ res.bg=res.bg||codes[0].yarn; codes.slice(1).forEach(c=>res.logo.push(c.yarn)); }
     else codes.forEach(c=>res.logo.push(c.yarn)); }
@@ -1614,7 +1635,7 @@ function readSpecial(p,sp){
   if(/toute la (dimension|surface|largeur|taille)|tout le tapis|full (size|width|mat)|whole (mat|size)|entire mat|fill the (whole|mat|entire)|ganze[nr]? (matte|fläche|breite)|gesamte|todo el (tapete|felpudo|ancho)|tutta la (superficie|dimensione)/.test(t)){ res.fill=true; res.notes.push("Logo enlarged to fill the mat (from instructions)."); }
   // "Ta bort 'Nära' och sträcket" (remove Nära and the dash): parts to take out by hand (ICA 5159135)
   if(/\b(remove|delete|leave out|take out|ta bort|entfern\w*|weglassen|supprim\w*|enlev\w*|retir\w*|quit\w*|elimin\w*|verwijder\w*|weghal\w*|rimuov\w*|togli\w*|fjern\w*|poista\w*|usuń\w*)\b/.test(t) && !/(do not|don't|dont|please don't|ne pas|nicht|no)\s+(remove|delete|supprim|entfern|quit|elimin|rimuov)/.test(t)) res.notes.push("The instructions ask to remove part of the artwork: take it out by hand before uploading.");
-  if(/photo\s*-?\s*realisti|photoréalist|fotorealist|as a photo|print the photo/.test(t)) res.photo=true;
+  if(/photo\s*-?\s*realisti|foto\s*-?\s*realist|photoréalist|fotorealist|as a photo|print the photo/.test(t)) res.photo=true;
   if(/(do not|don't|dont|please don't)\s+(remove|delete|leave out)|include all|keep all|nothing removed|alle (texte|details)|nichts (weg|entfern)/.test(t)) res.keepAll=true;
   const old=t.match(/old mat\s*:?\s*(\d{6,})|re-?order|same (design )?as (before|last|old)|wie (die |das )?(alte|letzte)/); if(old) res.notes.push("Reorder"+(old[1]?" of mat "+old[1]:"")+": check the previous design first.");
   return res;
