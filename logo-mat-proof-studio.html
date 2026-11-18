@@ -131,7 +131,7 @@ details[open] summary{margin-bottom:10px}
 
 <div class="wrap">
 <header class="top">
-  <h1>Logo Mat <span>Proof Studio</span> <small class="ver" title="Studio version and build date">v37 · 17 Nov 2026</small></h1>
+  <h1>Logo Mat <span>Proof Studio</span> <small class="ver" title="Studio version and build date">v38 · 18 Nov 2026</small></h1>
   <p>Drop the customer's logo, pick the mat style. It is redrawn as vectors, snapped to that style's yarn colours, placed on the mat, and packed as .ai + .wmf for upload.</p>
 </header>
 
@@ -1972,7 +1972,7 @@ function analyze(){
       let md=1e9; for(const c of cents){ const d=(l[0]-c.lab[0])**2+(l[1]-c.lab[1])**2+(l[2]-c.lab[2])**2; if(d<md) md=d; } if(md>900) far.push([l,md]); }
     if(cents.length>=2 && far.length>=Math.max(40,0.0015*tried)){
       far.sort((a,b)=>b[1]-a[1]); const core=far.slice(0,Math.max(20,far.length>>1)).map(x=>x[0]);
-      const add=mergeClose(kmeans(core,Math.min(4,core.length),rand),core.length).filter(c=>c.n>=Math.max(15,0.12*core.length) && Math.hypot(c.lab[1],c.lab[2])>=23 && cents.every(o=>de2000(o.lab,c.lab)>=20)); // vivid only: greys and dull tints are edge blends
+      const add=mergeClose(kmeans(core,Math.min(4,core.length),rand),core.length).filter(c=>c.n>=Math.max(15,0.12*core.length) && (Math.hypot(c.lab[1],c.lab[2])>=23 || c.lab[0]<Math.min(...cents.map(o=>o.lab[0]))-10) && cents.every(o=>de2000(o.lab,c.lab)>=20)); // vivid only: greys and dull tints are edge blends — except a grey darker than every colour, which no blend can make (thin black tagline under a blue logo, Dreelside 5167302)
       if(add.length){ cents=cents.concat(add.map(c=>Object.assign(c,{rescued:true}))); samples.push(...core); } } }
   const TR=255; S.dbg=[cents.map(c=>[labHex(c.lab),c.n,!!c.rescued])];
   let idx=assignPixels(data,N,cents);
@@ -2125,6 +2125,34 @@ function analyze(){
       for(let g=1;g<=gc.n;g++){ if(kept[g] || !cntG[g]) continue; const nearEdge= gc.x0[g]<edge || gc.y0[g]<edge || gc.x1[g]>w-1-edge || gc.y1[g]>h-1-edge;
         if(nearEdge){ drop[g]=1; nd++; } }
       if(nd){ for(let i=0;i<N;i++) if(lm[i] && drop[gc.lab[i]]){ const v=idx[i]; idx[i]=DROP; cnt[v]--; if(DROP!==TR) cnt[DROP]++; else trN++; } S.chromeDropped=nd; } } }
+  S.shadowDropped=0; S.specksDropped=0; S.shadeMerged=null;
+  if(!S.cleanup && !S.keepAll){ const isLogo=v=>v!==TR&&v!==bgC&&v!==panelC; let logoN=0; for(let k=0;k<cents.length;k++) if(isLogo(k)) logoN+=cnt[k];
+    // Drop shadows and glows: a pale colour close to the page that clings to the letters (grey shadow and white halo of the
+    // Dreelside 5167302 jpg). On paper they vanish into the page; on a grey mat they become outlines. Pieces that touch both the
+    // page and a letter go to the page; the same colour standing alone (light grey text) or inside a shape (a badge's lettering) stays.
+    const pale=bgC>=0? cents.map((c,k)=>isLogo(k) && de2000(c.lab,cents[bgC].lab)<20) : [];
+    if(bgC>=0) for(let k=0;k<cents.length;k++){ if(!pale[k] || !cnt[k]) continue;
+      const cc=components(w,h,i=>idx[i]===k,()=>true), tb=new Float64Array(cc.n+1), tl=new Float64Array(cc.n+1);
+      for(let i=0;i<N;i++){ if(idx[i]!==k) continue; const x=i%w, q=cc.lab[i]; for(const j of [x>0?i-1:-1,x<w-1?i+1:-1,i-w,i+w]){ if(j<0||j>=N) continue; const v=idx[j]; if(v===k) continue; if(v===bgC||v===TR||pale[v]) tb[q]++; else if(isLogo(v)) tl[q]++; } }
+      const near=de2000(cents[k].lab,cents[bgC].lab)<8, drop=new Uint8Array(cc.n+1); let dn=0; for(let q=1;q<=cc.n;q++){ const t=tb[q]+tl[q]; if(t && ((tl[q]>=0.25*t && tb[q]>=0.15*t) || (near && tb[q]>=0.6*t))){ drop[q]=1; dn+=cc.size[q]; } }
+      if(dn>=0.6*cnt[k]){ const all=dn>=0.85*cnt[k]; for(let i=0;i<N;i++) if(idx[i]===k && (all||drop[cc.lab[i]])){ idx[i]=bgC; cnt[k]--; cnt[bgC]++; } S.shadowDropped++; } }
+    // Specks: a colour with a sliver of the logo's pixels, scattered in crumbs (pink JPEG specks in a white crest, 5166967)
+    for(let k=0;k<cents.length;k++){ if(!isLogo(k) || !cnt[k] || cnt[k]>=0.004*logoN) continue;
+      const cc=components(w,h,i=>idx[i]===k,()=>true), up=Math.max(1,S.upscale||1); if(cnt[k]/cc.n >= Math.max(30,9*up*up)) continue;
+      const others=cents.map((c,j)=>j).filter(j=>j!==k&&cnt[j]>0);
+      for(let i=0;i<N;i++){ if(idx[i]!==k) continue; const q=i*4, l=rgbToLab(data[q],data[q+1],data[q+2]); let bj=others[0], bd=1e9; for(const j of others){ const c=cents[j].lab, dd=(c[0]-l[0])**2+(c[1]-l[1])**2+(c[2]-l[2])**2; if(dd<bd){ bd=dd; bj=j; } } idx[i]=bj; cnt[bj]++; }
+      cnt[k]=0; S.specksDropped++; }
+    // One ink in two shades: thin lines blend with the page and come out darker than the lettering, an exact mix of the ink
+    // and the page in every channel (Martonellas 5167114: gold lines 0.6 × the gold text on black). The designer uses one yarn.
+    if(bgC>=0){ const rgb=l=>{ const x=labHex(l); return [1,3,5].map(o=>parseInt(x.slice(o,o+2),16)); }, B=rgb(cents[bgC].lab);
+      for(let a=0;a<cents.length;a++) for(let b=0;b<cents.length;b++){ if(a===b||!isLogo(a)||!isLogo(b)||!cnt[a]||!cnt[b]) continue;
+        const A=rgb(cents[a].lab), F=rgb(cents[b].lab); if(chromaOf(cents[b].lab)<15) continue; const ks=[];
+        for(let c=0;c<3;c++){ const dF=F[c]-B[c]; if(Math.abs(dF)>=40) ks.push((A[c]-B[c])/dF); else if(Math.abs(A[c]-B[c])>25) ks.push(-1); }
+        if(ks.length<2 || Math.min(...ks)<0.45 || Math.max(...ks)>0.92 || Math.max(...ks)-Math.min(...ks)>0.08) continue;
+        const [keep,go]= cnt[a]>=cnt[b]? [a,b] : [b,a]; for(let i=0;i<N;i++) if(idx[i]===go) idx[i]=keep; cnt[keep]+=cnt[go]; cnt[go]=0; S.shadeMerged=labHex(cents[go].lab)+" → "+labHex(cents[keep].lab); } } }
+  if(cents.some((c,k)=>!cnt[k] && k!==bgC && k!==panelC)){ // emptied colours leave the list (no empty layers)
+    const map=new Int32Array(cents.length).fill(-1), nc=[], nn=[]; cents.forEach((c,k)=>{ if(cnt[k]||k===bgC||k===panelC){ map[k]=nc.length; nc.push(c); nn.push(cnt[k]); } });
+    for(let i=0;i<N;i++){ const v=idx[i]; if(v!==TR) idx[i]=map[v]; } bgC= bgC>=0? map[bgC] : -1; panelC= panelC>=0? map[panelC] : -1; cents=nc; cnt=Float64Array.from(nn); }
   const p=pal();
   S.clusters=cents.map((c,k)=>{ const m=nearestYarn(p,c.lab); return {lab:c.lab, hex:labHex(c.lab), count:cnt[k], yarn:m.yarn.label, de:m.de, bg:k===bgC||k===panelC, panel:k===panelC, grad:c.grad||null}; });
   separateYarns(); applyLogoYarn(); decideBg(); decidePanel(); fillYarnSelects();
@@ -3069,13 +3097,30 @@ const PORTAL_ORDER="https://designupload.logomatsllc.com/Design/ViewDesignHtml?d
 const ART_PREF=[/no-?effects/i,/reviewed/i];
 /* Which of several customer files is the best artwork: enough pixels, and clean flat colour like a logo file rather than
    a photo of a shop front or a mat (a 12 MP photo must not beat a crisp 1 MP logo). Clean files (most pixels in a few flat colours) come first; among them, more pixels and flatter colour win. */
+// the portal's mat mock-ups: "noeffects-artwork", and files named with the mat size ("KAVAZ s.r.o. 90x90.png", "…_80X100H_…")
+const MOCKUP=/no-?effects|\b\d{2,3}\s*[x×]\s*\d{2,3}\s*[hw]?\b|_\d{2,3}x\d{2,3}/i;
 async function artScore(blob){
   try{ const bm=await createImageBitmap(blob), w=bm.width, h=bm.height, sc=Math.min(1,256/Math.max(w,h)), cw=Math.max(1,Math.round(w*sc)), ch=Math.max(1,Math.round(h*sc));
     const c=document.createElement("canvas"); c.width=cw; c.height=ch; const g=c.getContext("2d"); g.drawImage(bm,0,0,cw,ch); const d=g.getImageData(0,0,cw,ch).data;
     const hist=new Map(); let n=0; for(let i=0;i<d.length;i+=4){ if(d[i+3]<128) continue; n++; const k=(d[i]>>4)<<8|(d[i+1]>>4)<<4|(d[i+2]>>4); hist.set(k,(hist.get(k)||0)+1); }
     const top=[...hist.values()].sort((a,b)=>b-a).slice(0,6).reduce((a,b)=>a+b,0), flat=n? top/n : 0;
     const blank= hist.size<2 ? 1 : 0;
-    return {w,h,flat,score: (flat>=0.8?100:0) + Math.log2(Math.min(w*h,6e6)+1) + 8*flat - 200*blank}; } // a clean logo file always beats a photo-like one
+    // The resolution that counts is the logo's, not the file's: the portal's mat mock-ups ("KAVAZ 90x90.png",
+    // noeffects-artwork) are bigger files with the logo shrunk inside a frame and a mat. Peel off up to two
+    // plain surrounds (frame, then mat) and measure what is left.
+    let bx0=0,by0=0,bx1=cw-1,by1=ch-1; const key=i=>(d[i]>>4)<<8|(d[i+1]>>4)<<4|(d[i+2]>>4);
+    let trE=0, allE=0; for(let x=0;x<cw;x++) for(const y of [0,ch-1]){ allE++; if(d[(y*cw+x)*4+3]<128) trE++; } for(let y=0;y<ch;y++) for(const x of [0,cw-1]){ allE++; if(d[(y*cw+x)*4+3]<128) trE++; }
+    const transparent= trE>0.4*allE;
+    if(transparent){ let x0=cw,y0=ch,x1=-1,y1=-1; for(let y=0;y<ch;y++) for(let x=0;x<cw;x++) if(d[(y*cw+x)*4+3]>=128){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; } if(x1>=x0){ bx0=x0; by0=y0; bx1=x1; by1=y1; } }
+    for(let lvl=0;lvl<(transparent?0:2);lvl++){ const eh=new Map(); let en=0;
+      const addE=(x,y)=>{ const i=(y*cw+x)*4; if(d[i+3]<128) return; const k=key(i); eh.set(k,(eh.get(k)||0)+1); en++; };
+      for(let x=bx0;x<=bx1;x++){ addE(x,by0); addE(x,by1); } for(let y=by0;y<=by1;y++){ addE(bx0,y); addE(bx1,y); }
+      if(!en) break; const [ek,ec]=[...eh.entries()].sort((a,b)=>b[1]-a[1])[0]; if(ec<0.6*en) break;
+      const near=i=>{ const k=key(i); return Math.abs((k>>8)-(ek>>8))<=1 && Math.abs(((k>>4)&15)-((ek>>4)&15))<=1 && Math.abs((k&15)-(ek&15))<=1; };
+      let x0=cw,y0=ch,x1=-1,y1=-1; for(let y=by0;y<=by1;y++) for(let x=bx0;x<=bx1;x++){ const i=(y*cw+x)*4; if(d[i+3]<128||near(i)) continue; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+      if(x1<x0) break; const inner=(x1-x0+1)*(y1-y0+1), outer=(bx1-bx0+1)*(by1-by0+1); bx0=x0; by0=y0; bx1=x1; by1=y1; if(inner>0.8*outer && lvl===0) continue; if(inner>0.8*outer) break; }
+    const lw=(bx1-bx0+1)/cw*w, lh=(by1-by0+1)/ch*h, logoPx=Math.max(1,lw*lh);
+    return {w,h,flat,logoW:Math.round(lw),logoH:Math.round(lh),score: (flat>=0.8?100:0) + Math.log2(Math.min(logoPx,6e6)+1) + 8*flat - 200*blank}; } // a clean logo file always beats a photo-like one
   catch(e){ return {w:0,h:0,flat:0,score:-1}; } }
 async function useOrder(o){
   lookupMsg(o.fieldsGuessed? "Some fields are blank on the portal page: check size and colours below." : ""); $("lookupNo").value=o.number;
@@ -3096,8 +3141,8 @@ async function useOrder(o){
   if(!vec && pool.length>1){ // several pictures: use the best one (clean logo files first, then the sharpest), like the designers pick the best file
     busy("Comparing "+pool.length+" artwork files…"); let best=null,bs=-1;
     for(const x of pool){ try{ let b; if(pdfPic && x===pdfPic.x) b=pdfPic.b; else { if(/\.(pdf|ai|svg)$/i.test(x.name)) continue; const r=await fetch("api/file?u="+encodeURIComponent(x.url)); if(!r.ok) continue; b=await r.blob(); }
-      const sc=await artScore(b); if(sc.score>bs){ bs=sc.score; best={x,b,sc}; } }catch(e){} }
-    busy(null); if(best){ lookupMsg(pool.length+" artwork files: using "+best.x.name+" ("+best.sc.w+" × "+best.sc.h+" px, "+(best.sc.flat>=0.75?"clean logo":"photo-like")+"). Use Load to pick another."); await loadFromBlob(best.b, best.x===(pdfPic&&pdfPic.x)? best.x.name.replace(/\.pdf$/i,".png") : best.x.name); return; } }
+      const sc=await artScore(b); if(MOCKUP.test(x.name)) sc.score-=3; if(sc.score>bs){ bs=sc.score; best={x,b,sc}; } }catch(e){} }
+    busy(null); if(best){ lookupMsg(pool.length+" artwork files: using "+best.x.name+" (logo "+best.sc.logoW+" × "+best.sc.logoH+" px, "+(best.sc.flat>=0.75?"clean logo":"photo-like")+"). Use Load to pick another."); await loadFromBlob(best.b, best.x===(pdfPic&&pdfPic.x)? best.x.name.replace(/\.pdf$/i,".png") : best.x.name); return; } }
   await loadArtwork(a);
 }
 function hasBookmark(){ try{ return localStorage.getItem("matstudio.bm")==="1"; }catch(e){ return false; } }
@@ -3348,7 +3393,7 @@ function readSpecial(p,sp){
     if(L!==R) res.alignX=L?"left":"right"; if(T!==B) res.alignY=T?"top":"bottom";
     if(res.alignX||res.alignY) res.notes.push("Logo placed "+[res.alignY,res.alignX].filter(Boolean).join(" ")+" (from instructions): check the position and size."); }
   // "mettre le logo sur toute la dimension du tapis": the logo fills the mat, small margin
-  if(/toute la (dimension|surface|largeur|taille)|tout le tapis|full (size|width|mat)|whole (mat|size)|entire mat|fill the (whole|mat|entire)|ganze[nr]? (matte|fläche|breite)|gesamte|todo el (tapete|felpudo|ancho)|tutta la (superficie|dimensione)/.test(t)){ res.fill=true; res.notes.push("Logo enlarged to fill the mat (from instructions)."); }
+  if(/toute la (dimension|surface|largeur|taille)|tout le tapis|full (size|width|mat)|whole (mat|size)|entire mat|fill the (whole|mat|entire)|ganze[nr]? (matte|fläche|breite)|gesamte|todo el (tapete|felpudo|ancho)|tutta la (superficie|dimensione)|as much (of the )?(surface|space|area)|stretch it|as large as possible|as big as possible|so gro(ß|ss) wie m(ö|o)glich|lo m(á|a)s grande posible/.test(t)){ res.fill=true; res.notes.push("Logo enlarged to fill the mat (from instructions)."); }
   // "Ta bort 'Nära' och sträcket" (remove Nära and the dash): parts to take out by hand (ICA 5159135)
   if(/\b(remove|delete|leave out|take out|ta bort|entfern\w*|weglassen|supprim\w*|enlev\w*|retir\w*|quit\w*|elimin\w*|verwijder\w*|weghal\w*|rimuov\w*|togli\w*|fjern\w*|poista\w*|usuń\w*)\b/.test(t) && !/(do not|don't|dont|please don't|ne pas|nicht|no)\s+(remove|delete|supprim|entfern|quit|elimin|rimuov)/.test(t)) res.notes.push("The instructions ask to remove part of the artwork: take it out by hand before uploading.");
   if(/photo\s*-?\s*realisti|foto\s*-?\s*realist|photoréalist|fotorealist|as a photo|print the photo/.test(t)) res.photo=true;
