@@ -131,7 +131,7 @@ details[open] summary{margin-bottom:10px}
 
 <div class="wrap">
 <header class="top">
-  <h1>Logo Mat <span>Proof Studio</span> <small class="ver" title="Studio version and build date">v39 · 19 Nov 2026</small></h1>
+  <h1>Logo Mat <span>Proof Studio</span> <small class="ver" title="Studio version and build date">v40 · 22 Nov 2026</small></h1>
   <p>Drop the customer's logo, pick the mat style. It is redrawn as vectors, snapped to that style's yarn colours, placed on the mat, and packed as .ai + .wmf for upload.</p>
 </header>
 
@@ -2177,13 +2177,39 @@ function analyze(){
         for(const [k,v,L2] of inks){ const d=[l[0]-B[0],l[1]-B[1],l[2]-B[2]], tt=(d[0]*v[0]+d[1]*v[1]+d[2]*v[2])/L2; if(tt<0.18) continue; const r=Math.hypot(d[0]-tt*v[0],d[1]-tt*v[1],d[2]-tt*v[2]); if(r>0.3*Math.sqrt(L2)) continue; if(tt>t[i]){ t[i]=tt; best[i]=k; } } }
       // only next to the ink already found: a hairline belongs to a letter; a faint long line elsewhere is a page fold or crop edge (Churrasqueira 5167282)
       const ink=new Uint8Array(N); for(let i=0;i<N;i++) ink[i]= t[i]===1?1:0; const near=morph(ink,w,h,true,Math.max(3,Math.round(0.012*Math.max(w,h))));
-      const add=[]; for(let y=2;y<h-2;y++) for(let x=2;x<w-2;x++){ const i=y*w+x; if(best[i]<0 || !near[i]) continue; const v=t[i];
-        const rx= v>=t[i-1]&&v>=t[i+1]&&v-Math.min(t[i-2],t[i+2])>0.08, ry= v>=t[i-w]&&v>=t[i+w]&&v-Math.min(t[i-2*w],t[i+2*w])>0.08;
-        if(rx||ry) add.push(i); }
-      if(add.length<0.5*N){ // grow along the line through fainter pixels touching it (hysteresis), so the hairline is not dotted
-        const on=new Uint8Array(N); for(const i of add) on[i]=1; let front=add.slice();
-        for(let it=0;it<3&&front.length;it++){ const nx=[]; for(const i of front) for(const j of [i-1,i+1,i-w,i+w,i-w-1,i-w+1,i+w-1,i+w+1]){ if(j<0||j>=N||on[j]||best[j]<0||t[j]<0.3) continue; on[j]=1; nx.push(j); } add.push(...nx); front=nx; }
-        for(const i of add){ const k=best[i]; idx[i]=k; cnt[k]++; cnt[bgC]--; } S.hairlines=add.length; } } }
+      const nearPanel= panelC>=0? morph(Uint8Array.from(idx,v=>v===panelC?1:0),w,h,true,3) : null; // the edge of a card is not a hairline (Churrasqueira 5167282)
+      // two passes: strict (a clear ridge, grown through pixels at least 0.3 of the way to the ink) next to the ink;
+      // loose (fainter, for a 1 px ring) only where the hairline on its own forms a big ring or frame round the logo
+      // (Domaine Pater Noster 5168945). Loose pixels next to letters would put bumps on blurred edges (Cosmedix).
+      const pass=(minC,minG)=>{ const add=[]; for(let y=2;y<h-2;y++) for(let x=2;x<w-2;x++){ const i=y*w+x; if(best[i]<0 || (nearPanel&&nearPanel[i])) continue; const v=t[i];
+          const rx= v>=t[i-1]&&v>=t[i+1]&&v-Math.min(t[i-2],t[i+2])>minC, ry= v>=t[i-w]&&v>=t[i+w]&&v-Math.min(t[i-2*w],t[i+2*w])>minC; if(rx||ry) add.push(i); }
+        if(add.length>=0.5*N) return null; const on=new Uint8Array(N); for(const i of add) on[i]=1; let front=add.slice();
+        for(let it=0;it<3&&front.length;it++){ const nx=[]; for(const i of front) for(const j of [i-1,i+1,i-w,i+w,i-w-1,i-w+1,i+w-1,i+w+1]){ if(j<0||j>=N||on[j]||best[j]<0||t[j]<minG) continue; on[j]=1; nx.push(j); } add.push(...nx); front=nx; }
+        return {add,on}; };
+      const st=pass(0.08,0.3), lo=pass(0.06,0.22), take=new Uint8Array(N);
+      if(st) for(const i of st.add) if(near[i]) take[i]=1;
+      if(lo){ const jg=morph(lo.on,w,h,true,3), hc=components(w,h,i=>jg[i]===1,()=>true), big=new Uint8Array(hc.n+1);
+        for(let q=1;q<=hc.n;q++) if(hc.x1[q]-hc.x0[q]>=0.3*w && hc.y1[q]-hc.y0[q]>=0.3*h) big[q]=1;
+        for(const i of lo.add) if(big[hc.lab[i]]) take[i]=1; }
+      let nAdd=0; for(let i=0;i<N;i++){ if(!take[i]) continue; const k=best[i]; idx[i]=k; cnt[k]++; cnt[bgC]--; nAdd++; } S.hairlines=nAdd; } }
+  // The order names the page colour as a logo colour (C01 White on a white page) but no artwork colour is that colour:
+  // the white is the figure's own fill, e.g. the lamb's body inside its outline (Domaine Pater Noster 5168945). Page areas
+  // enclosed by the ink, big and holding few pieces of ink, become that colour; letter counters and the disc inside a
+  // ring of lettering (many pieces inside) stay mat.
+  S.figureFills=0;
+  if(bgC>=0 && !S.cleanup && S.orderLogo){ const pl=pal(), ys=(S.logoYarn==="set"?S.logoSet:[S.logoYarn]).map(l=>yarnBy(pl,l)).filter(Boolean), pageY=ys.length>=2? ys.find(y=>de2000(y.lab,cents[bgC].lab)<10) : null; // with one order colour, a page-like yarn is just the logo colour (Beauty Hair Luxury: 400 Cloud Grey)
+    if(pageY && !cents.some((c,k)=>k!==bgC&&k!==panelC&&cnt[k]&&de2000(c.lab,pageY.lab)<10)){
+      const pc=components(w,h,i=>idx[i]===bgC,()=>true), edgeC=new Uint8Array(pc.n+1);
+      for(let x=0;x<w;x++){ edgeC[pc.lab[x]]=1; edgeC[pc.lab[(h-1)*w+x]]=1; } for(let y=0;y<h;y++){ edgeC[pc.lab[y*w]]=1; edgeC[pc.lab[y*w+w-1]]=1; }
+      const fillQ=[];
+      for(let q=1;q<=pc.n;q++){ if(edgeC[q] || pc.size[q]<0.01*N || pc.size[q]>0.25*N) continue; // letter counters are smaller (the big D of Domaine: 0.2%; the lamb: 3%)
+        const x0=pc.x0[q]-1,y0=pc.y0[q]-1,x1=pc.x1[q]+1,y1=pc.y1[q]+1; if(x0<0||y0<0||x1>=w||y1>=h) continue; const W=x1-x0+1,H=y1-y0+1, seen=new Uint8Array(W*H), st=[0]; seen[0]=1;
+        while(st.length){ const j=st.pop(), x=j%W, y=(j-x)/W; for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){ const xx=x+dx,yy=y+dy; if(xx<0||yy<0||xx>=W||yy>=H) continue; const r=yy*W+xx; if(seen[r]) continue; if(pc.lab[(y0+yy)*w+x0+xx]===q) continue; seen[r]=1; st.push(r); } }
+        const hole=new Uint8Array(W*H); for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const r=y*W+x; if(!seen[r] && pc.lab[(y0+y)*w+x0+x]!==q) hole[r]=1; }
+        let holes=0; { const hs=new Uint8Array(W*H); for(let r=0;r<W*H;r++){ if(!hole[r]||hs[r]) continue; holes++; const st2=[r]; hs[r]=1; while(st2.length){ const j=st2.pop(), x=j%W; for(const k of [x>0?j-1:-1,x<W-1?j+1:-1,j-W,j+W]){ if(k<0||k>=W*H||!hole[k]||hs[k]) continue; hs[k]=1; st2.push(k); } } } }
+        if(holes<=20) fillQ.push(q); }
+      if(fillQ.length){ const nk=cents.length, set=new Set(fillQ); cents.push({lab:pageY.lab.slice()}); cnt=Float64Array.from([...cnt,0]);
+        for(let i=0;i<N;i++) if(idx[i]===bgC && set.has(pc.lab[i])){ idx[i]=nk; cnt[nk]++; cnt[bgC]--; } S.figureFills=fillQ.length; } } }
   if(cents.some((c,k)=>!cnt[k] && k!==bgC && k!==panelC)){ // emptied colours leave the list (no empty layers)
     const map=new Int32Array(cents.length).fill(-1), nc=[], nn=[]; cents.forEach((c,k)=>{ if(cnt[k]||k===bgC||k===panelC){ map[k]=nc.length; nc.push(c); nn.push(cnt[k]); } });
     for(let i=0;i<N;i++){ const v=idx[i]; if(v!==TR) idx[i]=map[v]; } bgC= bgC>=0? map[bgC] : -1; panelC= panelC>=0? map[panelC] : -1; cents=nc; cnt=Float64Array.from(nn); }
@@ -2258,7 +2284,15 @@ function evenStrokes(m,w,h,rMin){
       a=u; }
     // keep parts of the old shape that the new line misses by more than a ripple (corners, spurs), so no gaps open up
     const nm=new Uint8Array(BW*BH); for(let j=0;j<BW*BH;j++) nm[j]=a[j]>=0.5?0:1; const far=chamfer(nm,BW,BH);
-    for(let y=Y0;y<=Y1;y++) for(let x=X0;x<=X1;x++){ const i=y*w+x, j=(y-Y0)*BW+(x-X0); const old=cc.lab[i]===k; if(old) m[i]=0; if(a[j]>=0.5 || (old && far[j]>=2.5)) m[i]=1; }
+    // ...together with the old pixels joining them to the new line: kept alone, a square corner sits apart from the rounded end
+    // with a hairline gap and comes out as a separate object (Padeldom 5168494, I Ur och Skur 5168504)
+    const keepOld=new Uint8Array(BW*BH); for(let y=Y0;y<=Y1;y++) for(let x=X0;x<=X1;x++){ const j=(y-Y0)*BW+(x-X0); if(cc.lab[y*w+x]===k && far[j]>=2.5) keepOld[j]=1; }
+    { // only pieces that do not already touch the new line are joined; the rest of the old edge keeps its ripples out
+      const kc=components(BW,BH,j=>keepOld[j]===1,()=>true), touch=new Uint8Array(kc.n+1);
+      for(let j=0;j<BW*BH;j++){ if(!keepOld[j]) continue; const x=j%BW; for(const q of [x>0?j-1:-1,x<BW-1?j+1:-1,j-BW,j+BW]) if(q>=0&&q<BW*BH&&a[q]>=0.5){ touch[kc.lab[j]]=1; break; } }
+      const grow=new Uint8Array(BW*BH); for(let j=0;j<BW*BH;j++) if(keepOld[j]&&!touch[kc.lab[j]]) grow[j]=1;
+      for(let it=0;it<4;it++){ const add=[]; for(let y=Y0+1;y<Y1;y++) for(let x=X0+1;x<X1;x++){ const j=(y-Y0)*BW+(x-X0); if(grow[j]||keepOld[j]||cc.lab[y*w+x]!==k) continue; if(grow[j-1]||grow[j+1]||grow[j-BW]||grow[j+BW]) add.push(j); } for(const j of add){ grow[j]=1; keepOld[j]=1; } } }
+    for(let y=Y0;y<=Y1;y++) for(let x=X0;x<=X1;x++){ const i=y*w+x, j=(y-Y0)*BW+(x-X0); const old=cc.lab[i]===k; if(old) m[i]=0; if(a[j]>=0.5 || keepOld[j]) m[i]=1; }
     done++; }
   return done;
 }
@@ -2527,6 +2561,7 @@ function contrastSwap(){ const p=pal(), bg=yarnBy(p,S.innerPanel||S.bg); if(!bg)
   for(const c of S.clusters){ if(c.bg||(c.hole&&c.yarn===S.bg&&!S.innerPanel)) continue; const y=yarnBy(p,c.yarn); if(!y) continue;
     // also grey on a near-black (or near-white) mat of almost the same lightness: dark grey crest on black (Freemen's 5157281)
     const lowL= Math.abs(y.lab[0]-bg.lab[0])<18 && chromaOf(y.lab)<12 && chromaOf(bg.lab)<12;
+    if(S.orderLogo && S.logoYarn==='set' && S.logoSet.includes(c.yarn) && c.yarn===bg.label) continue; // the order lists the mat colour as a logo colour: lettering filled in mat colour inside its outline (Top Shop 5168744)
     if(c.yarn===bg.label || de2000(y.lab,bg.lab)<10 || lowL){ const to=orderCols[0]||extremeYarn(p,bg.lab[0]>50); if(to && to.label!==c.yarn){ S.swapped.push(c.yarn+" → "+to.label); c.yarn=to.label; c.de=de2000(c.lab,to.lab); } } } }
 function assignPixels(data,N,cents){
   const idx=new Uint8Array(N), cache=new Map();
@@ -3171,7 +3206,7 @@ async function artScore(blob){
       let x0=cw,y0=ch,x1=-1,y1=-1; for(let y=by0;y<=by1;y++) for(let x=bx0;x<=bx1;x++){ const i=(y*cw+x)*4; if(d[i+3]<128||near(i)) continue; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
       if(x1<x0) break; const inner=(x1-x0+1)*(y1-y0+1), outer=(bx1-bx0+1)*(by1-by0+1); bx0=x0; by0=y0; bx1=x1; by1=y1; if(inner>0.8*outer && lvl===0) continue; if(inner>0.8*outer) break; }
     const lw=(bx1-bx0+1)/cw*w, lh=(by1-by0+1)/ch*h, logoPx=Math.max(1,lw*lh);
-    return {w,h,flat,logoW:Math.round(lw),logoH:Math.round(lh),score: (flat>=0.8?100:0) + Math.log2(Math.min(logoPx,6e6)+1) + 8*flat - 200*blank}; } // a clean logo file always beats a photo-like one
+    return {w,h,flat,logoW:Math.round(lw),logoH:Math.round(lh),score: (flat>=0.75?100:0) + 3*Math.log2(Math.min(logoPx,6e6)+1) + 8*flat - 200*blank}; } /* a clean logo file always beats a photo-like one; among clean files the most logo pixels wins (Azahara 5169106: thin cream text on transparent measures 0.78 flat, its mat mock-up 0.98) */
   catch(e){ return {w:0,h:0,flat:0,score:-1}; } }
 async function useOrder(o){
   lookupMsg(o.fieldsGuessed? "Some fields are blank on the portal page: check size and colours below." : ""); $("lookupNo").value=o.number;
