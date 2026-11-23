@@ -195,7 +195,19 @@ $("bCropAll").onclick=()=>{ closeCrop(); S.cropSrc=null; ingest(S.fullSrc,S.srcN
 $("bCropUse").onclick=()=>{ const r=crop.sel, k=crop.scale; if(!r) return; const c=document.createElement("canvas");
   c.width=Math.max(1,Math.round(r.w/k)); c.height=Math.max(1,Math.round(r.h/k)); c.getContext("2d").drawImage(S.fullSrc,Math.round(r.x/k),Math.round(r.y/k),c.width,c.height,0,0,c.width,c.height);
   const full=S.fullSrc; closeCrop(); S.cropSrc=c; ingest(c,S.srcName.replace(/ \(selection\)$/,"")+" (selection)",c.width+" × "+c.height+" px selected"); S.fullSrc=full; };
+/* A phone screenshot of a logo: plain bars of one colour above and below (or beside) a band holding the logo
+   (André 5168204: black bars, white band). The bars are not the page: crop to the band. */
+function letterbox(img){ const w0=img.naturalWidth||img.width, h0=img.naturalHeight||img.height; if(!w0||!h0) return null;
+  const k=Math.min(1,400/Math.max(w0,h0)), w=Math.max(1,Math.round(w0*k)), h=Math.max(1,Math.round(h0*k)), c=document.createElement("canvas"); c.width=w; c.height=h;
+  const x=c.getContext("2d",{willReadFrequently:true}); x.drawImage(img,0,0,w,h); const d=x.getImageData(0,0,w,h).data;
+  const px=(i)=>[d[i*4],d[i*4+1],d[i*4+2],d[i*4+3]], near=(a,b,t)=>Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1])+Math.abs(a[2]-b[2])<=t;
+  const line=(n,len,at)=>{ const c0=px(at(n,0)); if(c0[3]<200) return null; for(let j=1;j<len;j++){ const q=px(at(n,j)); if(q[3]<200||!near(q,c0,36)) return null; } return c0; };
+  const bands=(n,len,at)=>{ const a=line(0,len,at), b=line(n-1,len,at); if(!a||!b||!near(a,b,36)) return null; let t=0; while(t<n&&line(t,len,at)&&near(line(t,len,at),a,36)) t++; let u=n-1; while(u>t&&line(u,len,at)&&near(line(u,len,at),a,36)) u--;
+    if(t<0.08*n || n-1-u<0.08*n || u-t<0.1*n) return null; let other=0; for(let r=t;r<=u;r++) for(let j=0;j<len;j+=3){ if(!near(px(at(r,j)),a,60)) other++; } if(other<0.25*(u-t+1)*len/3) return null; let same=0; for(let r=t;r<=u;r++){ if(near(px(at(r,0)),a,60)) same++; if(near(px(at(r,len-1)),a,60)) same++; } if(same>0.5*2*(u-t+1)) return null; /* the band has its own page colour (white band between black bars), else the bars are just margin */ return [t,u]; };
+  const H=bands(h,w,(r,j)=>r*w+j), V=bands(w,h,(cl,j)=>j*w+cl); if(!H&&!V) return null;
+  const y0=H?(H[0]+1)/k:0, y1=H?H[1]/k:h0, x0=V?(V[0]+1)/k:0, x1=V?V[1]/k:w0; /* one step inside: no sliver of the bar is left */ return {x:Math.round(x0),y:Math.round(y0),w:Math.round(x1-x0),h:Math.round(y1-y0)}; }
 function ingest(img,name,info){
+  if(!S.cropSrc && window.LETTERBOX!==false){ const lb=letterbox(img); if(lb){ const c=document.createElement("canvas"); c.width=lb.w; c.height=lb.h; c.getContext("2d").drawImage(img,lb.x,lb.y,lb.w,lb.h,0,0,lb.w,lb.h); img=c; info+=" · screenshot bars cropped away"; } }
   let w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
   if(!w||!h){ w=1000; h=500; }
   S.plain=false; S.photoSrc=null; S.photoUser=false; S.cleanupUser=null; S.srcName=name; $("srcName").textContent=name; $("srcInfo").innerHTML=info+(S.isSample?'<span class="sample-tag">SAMPLE</span>':"");
@@ -256,7 +268,7 @@ function analyze(){
       let md=1e9; for(const c of cents){ const d=(l[0]-c.lab[0])**2+(l[1]-c.lab[1])**2+(l[2]-c.lab[2])**2; if(d<md) md=d; } if(md>900) far.push([l,md]); }
     if(cents.length>=2 && far.length>=Math.max(40,0.0015*tried)){
       far.sort((a,b)=>b[1]-a[1]); const core=far.slice(0,Math.max(20,far.length>>1)).map(x=>x[0]);
-      const add=mergeClose(kmeans(core,Math.min(4,core.length),rand),core.length).filter(c=>c.n>=Math.max(15,0.12*core.length) && Math.hypot(c.lab[1],c.lab[2])>=23 && cents.every(o=>de2000(o.lab,c.lab)>=20)); // vivid only: greys and dull tints are edge blends
+      const add=mergeClose(kmeans(core,Math.min(4,core.length),rand),core.length).filter(c=>c.n>=Math.max(15,0.12*core.length) && (Math.hypot(c.lab[1],c.lab[2])>=23 || c.lab[0]<Math.min(...cents.map(o=>o.lab[0]))-10) && cents.every(o=>de2000(o.lab,c.lab)>=20)); // vivid only: greys and dull tints are edge blends — except a grey darker than every colour, which no blend can make (thin black tagline under a blue logo, Dreelside 5167302)
       if(add.length){ cents=cents.concat(add.map(c=>Object.assign(c,{rescued:true}))); samples.push(...core); } } }
   const TR=255; S.dbg=[cents.map(c=>[labHex(c.lab),c.n,!!c.rescued])];
   let idx=assignPixels(data,N,cents);
@@ -374,10 +386,12 @@ function analyze(){
   let panelC=-1;
   { const K=cents.length, bx=new Int32Array(K*4); for(let k=0;k<K;k++){ bx[k*4]=w; bx[k*4+1]=h; bx[k*4+2]=-1; bx[k*4+3]=-1; }
     let fg=0; for(let y=0;y<h;y++) for(let x=0;x<w;x++){ const v=idx[y*w+x]; if(v===TR||v===bgC) continue; fg++; const o=v*4; if(x<bx[o])bx[o]=x; if(y<bx[o+1])bx[o+1]=y; if(x>bx[o+2])bx[o+2]=x; if(y>bx[o+3])bx[o+3]=y; }
-    let best=0;
+    let best=0; const edgeTR=edge[cents.length]>=0.5*edgeN; 
     for(let k=0;k<K;k++){ if(k===bgC || cnt[k]<0.3*fg || bx[k*4+2]<0) continue; const x0=bx[k*4],y0=bx[k*4+1],x1=bx[k*4+2],y1=bx[k*4+3], A=(x1-x0+1)*(y1-y0+1);
       if(A<0.15*N) continue; let inside=0; for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){ const v=idx[y*w+x]; if(v!==TR && v!==bgC) inside++; }
-      if(inside>=0.97*fg && inside>=0.9*A && cnt[k]>best){ best=cnt[k]; panelC=k; } } }
+      // a shaped badge on a transparent page that is mostly covered by the logo stays logo (Burger King's cream bun rim, 5168479)
+      const badge= bgC<0 && edgeTR && cnt[k]<0.45*fg && cnt[k]<0.95*A && inside<0.95*A;
+      if(inside>=0.97*fg && inside>=0.9*A && cnt[k]>best && !badge){ best=cnt[k]; panelC=k; } } }
   // Artwork drawn in the page colour on the panel (an outline frame, lettering) is logo, not background.
   if(panelC>=0 && S.bgConn){ const nk=cents.length; let moved=0; for(let i=0;i<N;i++) if(idx[i]===bgC && !S.bgConn[i]){ idx[i]=nk; moved++; }
     if(moved){ cents.push({lab:cents[bgC].lab.slice()}); cnt=new Float64Array(cents.length); trN=0; for(let i=0;i<N;i++){ const v=idx[i]; if(v===TR){trN++; continue;} cnt[v]++; } } }
@@ -409,6 +423,80 @@ function analyze(){
       for(let g=1;g<=gc.n;g++){ if(kept[g] || !cntG[g]) continue; const nearEdge= gc.x0[g]<edge || gc.y0[g]<edge || gc.x1[g]>w-1-edge || gc.y1[g]>h-1-edge;
         if(nearEdge){ drop[g]=1; nd++; } }
       if(nd){ for(let i=0;i<N;i++) if(lm[i] && drop[gc.lab[i]]){ const v=idx[i]; idx[i]=DROP; cnt[v]--; if(DROP!==TR) cnt[DROP]++; else trN++; } S.chromeDropped=nd; } } }
+  S.shadowDropped=0; S.specksDropped=0; S.shadeMerged=null; S.paleSd=[];
+  if(!S.cleanup && !S.keepAll){ const isLogo=v=>v!==TR&&v!==bgC&&v!==panelC; let logoN=0; for(let k=0;k<cents.length;k++) if(isLogo(k)) logoN+=cnt[k];
+    // Drop shadows and glows: a pale colour close to the page that clings to the letters (grey shadow and white halo of the
+    // Dreelside 5167302 jpg). On paper they vanish into the page; on a grey mat they become outlines. Pieces that touch both the
+    // page and a letter go to the page; the same colour standing alone (light grey text) or inside a shape (a badge's lettering) stays.
+    const pale=bgC>=0? cents.map((c,k)=>isLogo(k) && de2000(c.lab,cents[bgC].lab)<20) : [];
+    if(bgC>=0) for(let k=0;k<cents.length;k++){ if(!pale[k] || !cnt[k]) continue;
+      // a flat, even colour is a real ink (Burger King's cream bun and outline, 5168479); shadows and glows are graded
+      { let s1=0,s2=0,n=0; for(let i=0;i<N;i+=3){ if(idx[i]!==k) continue; const q=i*4, l=rgbToLab(data[q],data[q+1],data[q+2])[0]; s1+=l; s2+=l*l; n++; }
+        const sd=n? Math.sqrt(Math.max(0,s2/n-(s1/n)**2)) : 0; (S.paleSd=S.paleSd||[]).push([labHex(cents[k].lab),+sd.toFixed(2)]); if(sd<PALE_FLAT_SD) continue; }
+      const cc=components(w,h,i=>idx[i]===k,()=>true), tb=new Float64Array(cc.n+1), tl=new Float64Array(cc.n+1);
+      for(let i=0;i<N;i++){ if(idx[i]!==k) continue; const x=i%w, q=cc.lab[i]; for(const j of [x>0?i-1:-1,x<w-1?i+1:-1,i-w,i+w]){ if(j<0||j>=N) continue; const v=idx[j]; if(v===k) continue; if(v===bgC||v===TR||pale[v]) tb[q]++; else if(isLogo(v)) tl[q]++; } }
+      const near=de2000(cents[k].lab,cents[bgC].lab)<8, drop=new Uint8Array(cc.n+1); let dn=0; for(let q=1;q<=cc.n;q++){ const t=tb[q]+tl[q]; if(t && ((tl[q]>=0.25*t && tb[q]>=0.15*t) || (near && tb[q]>=0.6*t))){ drop[q]=1; dn+=cc.size[q]; } }
+      if(dn>=0.6*cnt[k]){ const all=dn>=0.85*cnt[k]; for(let i=0;i<N;i++) if(idx[i]===k && (all||drop[cc.lab[i]])){ idx[i]=bgC; cnt[k]--; cnt[bgC]++; } S.shadowDropped++; } }
+    // Specks: a colour with a sliver of the logo's pixels, scattered in crumbs (pink JPEG specks in a white crest, 5166967)
+    for(let k=0;k<cents.length;k++){ if(!isLogo(k) || !cnt[k] || cnt[k]>=0.004*logoN) continue;
+      const cc=components(w,h,i=>idx[i]===k,()=>true), up=Math.max(1,S.upscale||1); if(cnt[k]/cc.n >= Math.max(30,9*up*up)) continue;
+      const others=cents.map((c,j)=>j).filter(j=>j!==k&&cnt[j]>0);
+      for(let i=0;i<N;i++){ if(idx[i]!==k) continue; const q=i*4, l=rgbToLab(data[q],data[q+1],data[q+2]); let bj=others[0], bd=1e9; for(const j of others){ const c=cents[j].lab, dd=(c[0]-l[0])**2+(c[1]-l[1])**2+(c[2]-l[2])**2; if(dd<bd){ bd=dd; bj=j; } } idx[i]=bj; cnt[bj]++; }
+      cnt[k]=0; S.specksDropped++; }
+    // One ink in two shades: thin lines blend with the page and come out darker than the lettering, an exact mix of the ink
+    // and the page in every channel (Martonellas 5167114: gold lines 0.6 × the gold text on black). The designer uses one yarn.
+    if(bgC>=0){ const rgb=l=>{ const x=labHex(l); return [1,3,5].map(o=>parseInt(x.slice(o,o+2),16)); }, B=rgb(cents[bgC].lab);
+      for(let a=0;a<cents.length;a++) for(let b=0;b<cents.length;b++){ if(a===b||!isLogo(a)||!isLogo(b)||!cnt[a]||!cnt[b]) continue;
+        const A=rgb(cents[a].lab), F=rgb(cents[b].lab); if(chromaOf(cents[b].lab)<15) continue; const ks=[];
+        for(let c=0;c<3;c++){ const dF=F[c]-B[c]; if(Math.abs(dF)>=40) ks.push((A[c]-B[c])/dF); else if(Math.abs(A[c]-B[c])>25) ks.push(-1); }
+        if(ks.length<2 || Math.min(...ks)<0.45 || Math.max(...ks)>0.92 || Math.max(...ks)-Math.min(...ks)>0.08) continue;
+        const [keep,go]= cnt[a]>=cnt[b]? [a,b] : [b,a]; for(let i=0;i<N;i++) if(idx[i]===go) idx[i]=keep; cnt[keep]+=cnt[go]; cnt[go]=0; S.shadeMerged=labHex(cents[go].lab)+" → "+labHex(cents[keep].lab); } } }
+  // Hairlines: thin strokes of a light serif (Beauty Hair Luxury 5168280, gold on cream) blend with the page and
+  // fall nearer the page colour, so letters break apart. A page pixel on the line from the page to an ink colour,
+  // part-way there and darker than its neighbours on both sides (the middle of a thin line), is ink.
+  S.hairlines=0;
+  if(bgC>=0 && !S.cleanup && window.HAIRLINES!==false){ const B=cents[bgC].lab, inks=[]; for(let k=0;k<cents.length;k++){ if(k===bgC||k===panelC||!cnt[k]) continue; const C=cents[k].lab, v=[C[0]-B[0],C[1]-B[1],C[2]-B[2]], L2=v[0]**2+v[1]**2+v[2]**2; if(L2>=900) inks.push([k,v,L2]); }
+    if(inks.length){ const t=new Float32Array(N), best=new Int16Array(N).fill(-1);
+      for(let i=0;i<N;i++){ const u=idx[i]; if(u===TR||u===panelC) continue; if(u!==bgC){ t[i]=1; continue; } const q=i*4, l=rgbToLab(data[q],data[q+1],data[q+2]);
+        for(const [k,v,L2] of inks){ const d=[l[0]-B[0],l[1]-B[1],l[2]-B[2]], tt=(d[0]*v[0]+d[1]*v[1]+d[2]*v[2])/L2; if(tt<0.18) continue; const r=Math.hypot(d[0]-tt*v[0],d[1]-tt*v[1],d[2]-tt*v[2]); if(r>0.3*Math.sqrt(L2)) continue; if(tt>t[i]){ t[i]=tt; best[i]=k; } } }
+      // only next to the ink already found: a hairline belongs to a letter; a faint long line elsewhere is a page fold or crop edge (Churrasqueira 5167282)
+      const ink=new Uint8Array(N); for(let i=0;i<N;i++) ink[i]= t[i]===1?1:0; const near=morph(ink,w,h,true,Math.max(3,Math.round(0.012*Math.max(w,h))));
+      const nearPanel= panelC>=0? morph(Uint8Array.from(idx,v=>v===panelC?1:0),w,h,true,3) : null; // the edge of a card is not a hairline (Churrasqueira 5167282)
+      // two passes: strict (a clear ridge, grown through pixels at least 0.3 of the way to the ink) next to the ink;
+      // loose (fainter, for a 1 px ring) only where the hairline on its own forms a big ring or frame round the logo
+      // (Domaine Pater Noster 5168945). Loose pixels next to letters would put bumps on blurred edges (Cosmedix).
+      const pass=(minC,minG)=>{ const add=[]; for(let y=2;y<h-2;y++) for(let x=2;x<w-2;x++){ const i=y*w+x; if(best[i]<0 || (nearPanel&&nearPanel[i])) continue; const v=t[i];
+          const rx= v>=t[i-1]&&v>=t[i+1]&&v-Math.min(t[i-2],t[i+2])>minC, ry= v>=t[i-w]&&v>=t[i+w]&&v-Math.min(t[i-2*w],t[i+2*w])>minC; if(rx||ry) add.push(i); }
+        if(add.length>=0.5*N) return null; const on=new Uint8Array(N); for(const i of add) on[i]=1; let front=add.slice();
+        for(let it=0;it<3&&front.length;it++){ const nx=[]; for(const i of front) for(const j of [i-1,i+1,i-w,i+w,i-w-1,i-w+1,i+w-1,i+w+1]){ if(j<0||j>=N||on[j]||best[j]<0||t[j]<minG) continue; on[j]=1; nx.push(j); } add.push(...nx); front=nx; }
+        return {add,on}; };
+      const st=pass(0.08,0.3), lo=pass(0.06,0.22), take=new Uint8Array(N);
+      if(st) for(const i of st.add) if(near[i]) take[i]=1;
+      if(lo){ const jg=morph(lo.on,w,h,true,3), hc=components(w,h,i=>jg[i]===1,()=>true), big=new Uint8Array(hc.n+1);
+        for(let q=1;q<=hc.n;q++) if(hc.x1[q]-hc.x0[q]>=0.3*w && hc.y1[q]-hc.y0[q]>=0.3*h) big[q]=1;
+        for(const i of lo.add) if(big[hc.lab[i]]) take[i]=1; }
+      let nAdd=0; for(let i=0;i<N;i++){ if(!take[i]) continue; const k=best[i]; idx[i]=k; cnt[k]++; cnt[bgC]--; nAdd++; } S.hairlines=nAdd; } }
+  // The order names the page colour as a logo colour (C01 White on a white page) but no artwork colour is that colour:
+  // the white is the figure's own fill, e.g. the lamb's body inside its outline (Domaine Pater Noster 5168945). Page areas
+  // enclosed by the ink, big and holding few pieces of ink, become that colour; letter counters and the disc inside a
+  // ring of lettering (many pieces inside) stay mat.
+  S.figureFills=0;
+  if(bgC>=0 && !S.cleanup && S.orderLogo){ const pl=pal(), ys=(S.logoYarn==="set"?S.logoSet:[S.logoYarn]).map(l=>yarnBy(pl,l)).filter(Boolean), pageY=ys.length>=2? ys.find(y=>de2000(y.lab,cents[bgC].lab)<10) : null; // with one order colour, a page-like yarn is just the logo colour (Beauty Hair Luxury: 400 Cloud Grey)
+    if(pageY && !cents.some((c,k)=>k!==bgC&&k!==panelC&&cnt[k]&&de2000(c.lab,pageY.lab)<10)){
+      const pc=components(w,h,i=>idx[i]===bgC,()=>true), edgeC=new Uint8Array(pc.n+1);
+      for(let x=0;x<w;x++){ edgeC[pc.lab[x]]=1; edgeC[pc.lab[(h-1)*w+x]]=1; } for(let y=0;y<h;y++){ edgeC[pc.lab[y*w]]=1; edgeC[pc.lab[y*w+w-1]]=1; }
+      const fillQ=[];
+      for(let q=1;q<=pc.n;q++){ if(edgeC[q] || pc.size[q]<0.01*N || pc.size[q]>0.25*N) continue; // letter counters are smaller (the big D of Domaine: 0.2%; the lamb: 3%)
+        const x0=pc.x0[q]-1,y0=pc.y0[q]-1,x1=pc.x1[q]+1,y1=pc.y1[q]+1; if(x0<0||y0<0||x1>=w||y1>=h) continue; const W=x1-x0+1,H=y1-y0+1, seen=new Uint8Array(W*H), st=[0]; seen[0]=1;
+        while(st.length){ const j=st.pop(), x=j%W, y=(j-x)/W; for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){ const xx=x+dx,yy=y+dy; if(xx<0||yy<0||xx>=W||yy>=H) continue; const r=yy*W+xx; if(seen[r]) continue; if(pc.lab[(y0+yy)*w+x0+xx]===q) continue; seen[r]=1; st.push(r); } }
+        const hole=new Uint8Array(W*H); for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const r=y*W+x; if(!seen[r] && pc.lab[(y0+y)*w+x0+x]!==q) hole[r]=1; }
+        let holes=0; { const hs=new Uint8Array(W*H); for(let r=0;r<W*H;r++){ if(!hole[r]||hs[r]) continue; holes++; const st2=[r]; hs[r]=1; while(st2.length){ const j=st2.pop(), x=j%W; for(const k of [x>0?j-1:-1,x<W-1?j+1:-1,j-W,j+W]){ if(k<0||k>=W*H||!hole[k]||hs[k]) continue; hs[k]=1; st2.push(k); } } } }
+        if(holes<=20) fillQ.push(q); }
+      if(fillQ.length){ const nk=cents.length, set=new Set(fillQ); cents.push({lab:pageY.lab.slice()}); cnt=Float64Array.from([...cnt,0]);
+        for(let i=0;i<N;i++) if(idx[i]===bgC && set.has(pc.lab[i])){ idx[i]=nk; cnt[nk]++; cnt[bgC]--; } S.figureFills=fillQ.length; } } }
+  if(cents.some((c,k)=>!cnt[k] && k!==bgC && k!==panelC)){ // emptied colours leave the list (no empty layers)
+    const map=new Int32Array(cents.length).fill(-1), nc=[], nn=[]; cents.forEach((c,k)=>{ if(cnt[k]||k===bgC||k===panelC){ map[k]=nc.length; nc.push(c); nn.push(cnt[k]); } });
+    for(let i=0;i<N;i++){ const v=idx[i]; if(v!==TR) idx[i]=map[v]; } bgC= bgC>=0? map[bgC] : -1; panelC= panelC>=0? map[panelC] : -1; cents=nc; cnt=Float64Array.from(nn); }
   const p=pal();
   S.clusters=cents.map((c,k)=>{ const m=nearestYarn(p,c.lab); return {lab:c.lab, hex:labHex(c.lab), count:cnt[k], yarn:m.yarn.label, de:m.de, bg:k===bgC||k===panelC, panel:k===panelC, grad:c.grad||null}; });
   separateYarns(); applyLogoYarn(); decideBg(); decidePanel(); fillYarnSelects();
@@ -420,7 +508,7 @@ function analyze(){
   S.photoFit= bgC>=0 && S.bgFlat>0.7 ? "cut" : "bleed";
   contrastSwap(); computeBBox(); renderYarnMap(); retrace();
 }
-const PHOTO_RESID=0.42;
+const PHOTO_RESID=0.42, PALE_FLAT_SD=0;
 // A printed style keeps photographic artwork as a photo, unless the order names logo yarns: then it is a logo to redraw
 // in those yarns, however soft the file is (Ferryman 5158667 came out as a cropped photo).
 function autoPhoto(){ return STYLES[S.style].print && S.resid>PHOTO_RESID && !S.orderLogo; }
@@ -432,7 +520,7 @@ function decidePanel(){ S.innerPanel=null; const p=pal();
   if(de2000(a.lab,Y.lab)<20){ S.innerPanel=Y.label; S.bgNote=(S.bgNote?S.bgNote+" ":"")+"Artwork backdrop kept as an inner panel in "+Y.label+" (order lists it with the mat colour)."; }
 }
 
-const MIN_STROKE_MM=6;
+const MIN_STROKE_MM=4.5; // designers draw thin lines at about 4-5 mm (BQS outline, Buon Natale snowflakes 5167746: ~4 mm)
 function smoothMask(m,w,h,r){ if(r<1) return; const N=w*h; let a=new Float32Array(N), b=new Float32Array(N); for(let i=0;i<N;i++) a[i]=m[i];
   for(let pass=0;pass<2;pass++){
     for(let y=0;y<h;y++){ let acc=0; const o=y*w; for(let x=-r;x<=r;x++) acc+=a[o+Math.min(w-1,Math.max(0,x))];
@@ -480,10 +568,28 @@ function evenStrokes(m,w,h,rMin){
       a=u; }
     // keep parts of the old shape that the new line misses by more than a ripple (corners, spurs), so no gaps open up
     const nm=new Uint8Array(BW*BH); for(let j=0;j<BW*BH;j++) nm[j]=a[j]>=0.5?0:1; const far=chamfer(nm,BW,BH);
-    for(let y=Y0;y<=Y1;y++) for(let x=X0;x<=X1;x++){ const i=y*w+x, j=(y-Y0)*BW+(x-X0); const old=cc.lab[i]===k; if(old) m[i]=0; if(a[j]>=0.5 || (old && far[j]>=2.5)) m[i]=1; }
+    // ...together with the old pixels joining them to the new line: kept alone, a square corner sits apart from the rounded end
+    // with a hairline gap and comes out as a separate object (Padeldom 5168494, I Ur och Skur 5168504)
+    const keepOld=new Uint8Array(BW*BH); for(let y=Y0;y<=Y1;y++) for(let x=X0;x<=X1;x++){ const j=(y-Y0)*BW+(x-X0); if(cc.lab[y*w+x]===k && far[j]>=2.5) keepOld[j]=1; }
+    { // only pieces that do not already touch the new line are joined; the rest of the old edge keeps its ripples out
+      const kc=components(BW,BH,j=>keepOld[j]===1,()=>true), touch=new Uint8Array(kc.n+1);
+      for(let j=0;j<BW*BH;j++){ if(!keepOld[j]) continue; const x=j%BW; for(const q of [x>0?j-1:-1,x<BW-1?j+1:-1,j-BW,j+BW]) if(q>=0&&q<BW*BH&&a[q]>=0.5){ touch[kc.lab[j]]=1; break; } }
+      const grow=new Uint8Array(BW*BH); for(let j=0;j<BW*BH;j++) if(keepOld[j]&&!touch[kc.lab[j]]) grow[j]=1;
+      for(let it=0;it<4;it++){ const add=[]; for(let y=Y0+1;y<Y1;y++) for(let x=X0+1;x<X1;x++){ const j=(y-Y0)*BW+(x-X0); if(grow[j]||keepOld[j]||cc.lab[y*w+x]!==k) continue; if(grow[j-1]||grow[j+1]||grow[j-BW]||grow[j+BW]) add.push(j); } for(const j of add){ grow[j]=1; keepOld[j]=1; } } }
+    for(let y=Y0;y<=Y1;y++) for(let x=X0;x<=X1;x++){ const i=y*w+x, j=(y-Y0)*BW+(x-X0); const old=cc.lab[i]===k; if(old) m[i]=0; if(a[j]>=0.5 || keepOld[j]) m[i]=1; }
     done++; }
   return done;
 }
+function smallSymbols(m,w,h,maxPx){ // small rings holding a mark (®, ©)
+  const cc=components(w,h,i=>m[i]===1,()=>true), out=[]; if(cc.n>4000) return null;
+  for(let k=1;k<=cc.n;k++){ const x0=cc.x0[k],y0=cc.y0[k],x1=cc.x1[k],y1=cc.y1[k], bw=x1-x0+1, bh=y1-y0+1; if(Math.max(bw,bh)>maxPx || Math.max(bw,bh)<6 || cc.size[k]<20) continue;
+    // a ring with a mark inside it (®, ©): another piece of this colour sits within its box. Letters of a word are left alone.
+    let nested=0; for(let y=y0;y<=y1&&!nested;y++) for(let x=x0;x<=x1;x++){ const i=y*w+x; if(m[i]&&cc.lab[i]!==k){ nested=1; break; } } if(!nested) continue;
+    const W=bw+2, H=bh+2, seen=new Uint8Array(W*H), st=[0]; seen[0]=1; let reached=0, empty=0;
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const gx=x0-1+x, gy=y0-1+y; if(!(gx>=0&&gy>=0&&gx<w&&gy<h&&cc.lab[gy*w+gx]===k)) empty++; }
+    while(st.length){ const j=st.pop(); reached++; const x=j%W, y=(j-x)/W; for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){ const xx=x+dx, yy=y+dy; if(xx<0||yy<0||xx>=W||yy>=H) continue; const q=yy*W+xx; if(seen[q]) continue; const gx=x0-1+xx, gy=y0-1+yy; if(gx>=0&&gy>=0&&gx<w&&gy<h&&cc.lab[gy*w+gx]===k) continue; seen[q]=1; st.push(q); } }
+    if(empty-reached < 4) continue; const px=[]; for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){ const i=y*w+x; if(m[i]) px.push(i); } out.push([x0,y0,x1,y1,px]); }
+  return out.length? out : null; }
 function thickenThin(m,w,h,r){
   if(!(r>=1)) return; const N=w*h, dt=chamfer(m,w,h), R=Math.ceil(r), disc=[];
   // specks and dust stay as they are (they are dropped later as too small); only real shapes get thickened
@@ -739,6 +845,7 @@ function contrastSwap(){ const p=pal(), bg=yarnBy(p,S.innerPanel||S.bg); if(!bg)
   for(const c of S.clusters){ if(c.bg||(c.hole&&c.yarn===S.bg&&!S.innerPanel)) continue; const y=yarnBy(p,c.yarn); if(!y) continue;
     // also grey on a near-black (or near-white) mat of almost the same lightness: dark grey crest on black (Freemen's 5157281)
     const lowL= Math.abs(y.lab[0]-bg.lab[0])<18 && chromaOf(y.lab)<12 && chromaOf(bg.lab)<12;
+    if(S.orderLogo && S.logoYarn==='set' && S.logoSet.includes(c.yarn) && c.yarn===bg.label) continue; // the order lists the mat colour as a logo colour: lettering filled in mat colour inside its outline (Top Shop 5168744)
     if(c.yarn===bg.label || de2000(y.lab,bg.lab)<10 || lowL){ const to=orderCols[0]||extremeYarn(p,bg.lab[0]>50); if(to && to.label!==c.yarn){ S.swapped.push(c.yarn+" → "+to.label); c.yarn=to.label; c.de=de2000(c.lab,to.lab); } } } }
 function assignPixels(data,N,cents){
   const idx=new Uint8Array(N), cache=new Map();
@@ -872,11 +979,17 @@ function doTrace(){
   const lay=layout(), mmPerPx=lay.k||1, dpx=S.minDetail/mmPerPx;
   // each colour's own pixels; thin strokes of even width (outlines, script, rules) are redrawn as one even line first
   const own=order.map((g,li)=>{ const m=new Uint8Array(N); for(let i=0;i<N;i++) m[i]= layerOf[S.idx[i]]===li ? 1:0; return m; });
+  const keeps=own.map(m=>S.keepThin? null : smallSymbols(m,w,h,30/mmPerPx)), pre= keeps.some(Boolean)? own.map(m=>m.slice()) : null;
   S.evenDbg=[]; if(!S.keepThin && window.EVEN_STROKES!==false) own.forEach(m=>S.evenDbg.push(evenStrokes(m,w,h,MIN_STROKE_MM/2/mmPerPx)));
+  if(pre){ const R=Math.ceil(MIN_STROKE_MM/2/mmPerPx)+1; for(const kp of keeps) if(kp) for(const [x0,y0,x1,y1] of kp) for(let y=Math.max(0,y0-R);y<=Math.min(h-1,y1+R);y++) for(let x=Math.max(0,x0-R);x<=Math.min(w-1,x1+R);x++){ const i=y*w+x; own.forEach((m,li)=>m[i]=pre[li][i]); } }
   const masks=own.map(m=>m.slice()); if(S.build==="stacked") for(let li=masks.length-2;li>=0;li--){ const a=masks[li], b=masks[li+1]; for(let i=0;i<N;i++) if(b[i]) a[i]=1; }
   // Designers never leave a stroke thinner than about 4-5 mm on the mat (it would not tuft): thin lines, hairline
   // rings and light lettering are thickened to the minimum; strokes already thicker are untouched.
-  if(!S.keepThin) masks.forEach(m=>thickenThin(m,w,h,MIN_STROKE_MM/2/mmPerPx));
+  if(!S.keepThin){ // a small ® or © keeps its own drawing in every layer: thickened, it fills in to a dot (Burger King 5168479)
+    const R=Math.ceil(MIN_STROKE_MM/2/mmPerPx)+1, boxes=[].concat(...keeps.filter(Boolean)).map(([x0,y0,x1,y1])=>[Math.max(0,x0-R),Math.max(0,y0-R),Math.min(w-1,x1+R),Math.min(h-1,y1+R)]);
+    const saved=masks.map(m=>boxes.map(([x0,y0,x1,y1])=>{ const a=[]; for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) a.push(m[y*w+x]); return a; }));
+    masks.forEach(m=>thickenThin(m,w,h,MIN_STROKE_MM/2/mmPerPx));
+    masks.forEach((m,li)=>boxes.forEach(([x0,y0,x1,y1],b)=>{ const a=saved[li][b]; let j=0; for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) m[y*w+x]=a[j++]; })); }
   const opts={pathomit:Math.max(8,Math.round(dpx*3)),rightangleenhance:false};
   const rs=Math.max(w,h)/1400; // detail windows scale with the working resolution
   // enlarged low-res artwork: one source pixel is several work pixels, so JPEG ripples along edges are that big too;
@@ -891,7 +1004,8 @@ function onTrace(e){
   const m=e.data; if(m.job!==S.traceJob || S.plain) return;
   if(m.progress){ busy("Tracing layer "+m.progress+" of "+m.of+"…"); return; }
   const p=pal();
-  S.layers=m.layers.map((tl,li)=>{ const y=yarnBy(p,S.pendingOrder[li].yarn); return {yarn:y, grad:S.pendingOrder[li].grad||null, paths:geomFromTrace(tl)}; });
+  S.layers=m.layers.map((tl,li)=>{ const y=yarnBy(p,S.pendingOrder[li].yarn); return {yarn:y, grad:S.pendingOrder[li].grad||null, paths:geomFromTrace(tl)}; }).filter(l=>l.yarn||l.grad); // a style change while tracing can leave a yarn of the old range
+
   S.enlarged=enlargeSmallText(S.layers, layout().k||1);
   snapGeometry(S.layers, layout().k||1);
   S.layers.forEach(L=>{ L.d=L.paths.map(contoursToD).join(" "); L.p2d=new Path2D(L.d); });
@@ -1031,7 +1145,7 @@ function drawMat(ctx, px, ox, oy, mode){ // px = canvas pixels per mm
   if(mode==="mockup" && st.tex==="impression" && !S.plain){
     for(const ly of S.layers){ ctx.save(); ctx.translate(0.7/L.k,0.9/L.k); ctx.fillStyle="rgba(0,0,0,.35)"; ctx.fill(ly.p2d,"evenodd"); ctx.restore(); }
   }
-  if(!S.plain) for(const ly of S.layers){ ctx.fillStyle=ly.grad? gradFill(ctx,ly.grad) : ly.yarn.hex; ctx.fill(ly.p2d,"evenodd"); }
+  if(!S.plain) for(const ly of S.layers){ if(!ly.grad&&!ly.yarn) continue; ctx.fillStyle=ly.grad? gradFill(ctx,ly.grad) : ly.yarn.hex; ctx.fill(ly.p2d,"evenodd"); }
   if(S.photo && S.srcCanvas && !S.plain){ ctx.imageSmoothingQuality="high"; const bb=S.bbox; ctx.drawImage(photoSource(),bb.x,bb.y,bb.w,bb.h); }
   ctx.restore();
   if(mode==="mockup"){
@@ -1353,13 +1467,30 @@ const PORTAL_ORDER="https://designupload.logomatsllc.com/Design/ViewDesignHtml?d
 const ART_PREF=[/no-?effects/i,/reviewed/i];
 /* Which of several customer files is the best artwork: enough pixels, and clean flat colour like a logo file rather than
    a photo of a shop front or a mat (a 12 MP photo must not beat a crisp 1 MP logo). Clean files (most pixels in a few flat colours) come first; among them, more pixels and flatter colour win. */
+// the portal's mat mock-ups: "noeffects-artwork", and files named with the mat size ("KAVAZ s.r.o. 90x90.png", "…_80X100H_…")
+const MOCKUP=/no-?effects|\b\d{2,3}\s*[x×]\s*\d{2,3}\s*[hw]?\b|_\d{2,3}x\d{2,3}/i;
 async function artScore(blob){
   try{ const bm=await createImageBitmap(blob), w=bm.width, h=bm.height, sc=Math.min(1,256/Math.max(w,h)), cw=Math.max(1,Math.round(w*sc)), ch=Math.max(1,Math.round(h*sc));
     const c=document.createElement("canvas"); c.width=cw; c.height=ch; const g=c.getContext("2d"); g.drawImage(bm,0,0,cw,ch); const d=g.getImageData(0,0,cw,ch).data;
     const hist=new Map(); let n=0; for(let i=0;i<d.length;i+=4){ if(d[i+3]<128) continue; n++; const k=(d[i]>>4)<<8|(d[i+1]>>4)<<4|(d[i+2]>>4); hist.set(k,(hist.get(k)||0)+1); }
     const top=[...hist.values()].sort((a,b)=>b-a).slice(0,6).reduce((a,b)=>a+b,0), flat=n? top/n : 0;
     const blank= hist.size<2 ? 1 : 0;
-    return {w,h,flat,score: (flat>=0.8?100:0) + Math.log2(Math.min(w*h,6e6)+1) + 8*flat - 200*blank}; } // a clean logo file always beats a photo-like one
+    // The resolution that counts is the logo's, not the file's: the portal's mat mock-ups ("KAVAZ 90x90.png",
+    // noeffects-artwork) are bigger files with the logo shrunk inside a frame and a mat. Peel off up to two
+    // plain surrounds (frame, then mat) and measure what is left.
+    let bx0=0,by0=0,bx1=cw-1,by1=ch-1; const key=i=>(d[i]>>4)<<8|(d[i+1]>>4)<<4|(d[i+2]>>4);
+    let trE=0, allE=0; for(let x=0;x<cw;x++) for(const y of [0,ch-1]){ allE++; if(d[(y*cw+x)*4+3]<128) trE++; } for(let y=0;y<ch;y++) for(const x of [0,cw-1]){ allE++; if(d[(y*cw+x)*4+3]<128) trE++; }
+    const transparent= trE>0.4*allE;
+    if(transparent){ let x0=cw,y0=ch,x1=-1,y1=-1; for(let y=0;y<ch;y++) for(let x=0;x<cw;x++) if(d[(y*cw+x)*4+3]>=128){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; } if(x1>=x0){ bx0=x0; by0=y0; bx1=x1; by1=y1; } }
+    for(let lvl=0;lvl<(transparent?0:2);lvl++){ const eh=new Map(); let en=0;
+      const addE=(x,y)=>{ const i=(y*cw+x)*4; if(d[i+3]<128) return; const k=key(i); eh.set(k,(eh.get(k)||0)+1); en++; };
+      for(let x=bx0;x<=bx1;x++){ addE(x,by0); addE(x,by1); } for(let y=by0;y<=by1;y++){ addE(bx0,y); addE(bx1,y); }
+      if(!en) break; const [ek,ec]=[...eh.entries()].sort((a,b)=>b[1]-a[1])[0]; if(ec<0.6*en) break;
+      const near=i=>{ const k=key(i); return Math.abs((k>>8)-(ek>>8))<=1 && Math.abs(((k>>4)&15)-((ek>>4)&15))<=1 && Math.abs((k&15)-(ek&15))<=1; };
+      let x0=cw,y0=ch,x1=-1,y1=-1; for(let y=by0;y<=by1;y++) for(let x=bx0;x<=bx1;x++){ const i=(y*cw+x)*4; if(d[i+3]<128||near(i)) continue; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+      if(x1<x0) break; const inner=(x1-x0+1)*(y1-y0+1), outer=(bx1-bx0+1)*(by1-by0+1); bx0=x0; by0=y0; bx1=x1; by1=y1; if(inner>0.8*outer && lvl===0) continue; if(inner>0.8*outer) break; }
+    const lw=(bx1-bx0+1)/cw*w, lh=(by1-by0+1)/ch*h, logoPx=Math.max(1,lw*lh);
+    return {w,h,flat,logoW:Math.round(lw),logoH:Math.round(lh),score: (flat>=0.75?100:0) + 3*Math.log2(Math.min(logoPx,6e6)+1) + 8*flat - 200*blank}; } /* a clean logo file always beats a photo-like one; among clean files the most logo pixels wins (Azahara 5169106: thin cream text on transparent measures 0.78 flat, its mat mock-up 0.98) */
   catch(e){ return {w:0,h:0,flat:0,score:-1}; } }
 async function useOrder(o){
   lookupMsg(o.fieldsGuessed? "Some fields are blank on the portal page: check size and colours below." : ""); $("lookupNo").value=o.number;
@@ -1380,8 +1511,8 @@ async function useOrder(o){
   if(!vec && pool.length>1){ // several pictures: use the best one (clean logo files first, then the sharpest), like the designers pick the best file
     busy("Comparing "+pool.length+" artwork files…"); let best=null,bs=-1;
     for(const x of pool){ try{ let b; if(pdfPic && x===pdfPic.x) b=pdfPic.b; else { if(/\.(pdf|ai|svg)$/i.test(x.name)) continue; const r=await fetch("api/file?u="+encodeURIComponent(x.url)); if(!r.ok) continue; b=await r.blob(); }
-      const sc=await artScore(b); if(sc.score>bs){ bs=sc.score; best={x,b,sc}; } }catch(e){} }
-    busy(null); if(best){ lookupMsg(pool.length+" artwork files: using "+best.x.name+" ("+best.sc.w+" × "+best.sc.h+" px, "+(best.sc.flat>=0.75?"clean logo":"photo-like")+"). Use Load to pick another."); await loadFromBlob(best.b, best.x===(pdfPic&&pdfPic.x)? best.x.name.replace(/\.pdf$/i,".png") : best.x.name); return; } }
+      const sc=await artScore(b); if(MOCKUP.test(x.name)) sc.score-=3; if(sc.score>bs){ bs=sc.score; best={x,b,sc}; } }catch(e){} }
+    busy(null); if(best){ lookupMsg(pool.length+" artwork files: using "+best.x.name+" (logo "+best.sc.logoW+" × "+best.sc.logoH+" px, "+(best.sc.flat>=0.75?"clean logo":"photo-like")+"). Use Load to pick another."); await loadFromBlob(best.b, best.x===(pdfPic&&pdfPic.x)? best.x.name.replace(/\.pdf$/i,".png") : best.x.name); return; } }
   await loadArtwork(a);
 }
 function hasBookmark(){ try{ return localStorage.getItem("matstudio.bm")==="1"; }catch(e){ return false; } }
@@ -1632,7 +1763,7 @@ function readSpecial(p,sp){
     if(L!==R) res.alignX=L?"left":"right"; if(T!==B) res.alignY=T?"top":"bottom";
     if(res.alignX||res.alignY) res.notes.push("Logo placed "+[res.alignY,res.alignX].filter(Boolean).join(" ")+" (from instructions): check the position and size."); }
   // "mettre le logo sur toute la dimension du tapis": the logo fills the mat, small margin
-  if(/toute la (dimension|surface|largeur|taille)|tout le tapis|full (size|width|mat)|whole (mat|size)|entire mat|fill the (whole|mat|entire)|ganze[nr]? (matte|fläche|breite)|gesamte|todo el (tapete|felpudo|ancho)|tutta la (superficie|dimensione)/.test(t)){ res.fill=true; res.notes.push("Logo enlarged to fill the mat (from instructions)."); }
+  if(/toute la (dimension|surface|largeur|taille)|tout le tapis|full (size|width|mat)|whole (mat|size)|entire mat|fill the (whole|mat|entire)|ganze[nr]? (matte|fläche|breite)|gesamte|todo el (tapete|felpudo|ancho)|tutta la (superficie|dimensione)|as much (of the )?(surface|space|area)|stretch it|as large as possible|as big as possible|so gro(ß|ss) wie m(ö|o)glich|lo m(á|a)s grande posible/.test(t)){ res.fill=true; res.notes.push("Logo enlarged to fill the mat (from instructions)."); }
   // "Ta bort 'Nära' och sträcket" (remove Nära and the dash): parts to take out by hand (ICA 5159135)
   if(/\b(remove|delete|leave out|take out|ta bort|entfern\w*|weglassen|supprim\w*|enlev\w*|retir\w*|quit\w*|elimin\w*|verwijder\w*|weghal\w*|rimuov\w*|togli\w*|fjern\w*|poista\w*|usuń\w*)\b/.test(t) && !/(do not|don't|dont|please don't|ne pas|nicht|no)\s+(remove|delete|supprim|entfern|quit|elimin|rimuov)/.test(t)) res.notes.push("The instructions ask to remove part of the artwork: take it out by hand before uploading.");
   if(/photo\s*-?\s*realisti|foto\s*-?\s*realist|photoréalist|fotorealist|as a photo|print the photo/.test(t)) res.photo=true;
