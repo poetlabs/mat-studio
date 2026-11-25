@@ -39,7 +39,7 @@ for (const k in PALETTES){ YARNS[k]=PALETTES[k].map(([label,hex])=>{ const rgb=h
 // Swatches without a yarn code (e.g. "White No Clear") are special-purpose: selectable, never auto-picked.
 function nearestYarn(pal,lab){ let best=null,bd=1e9; const all=[]; for(const y of YARNS[pal]){ if(y.manual) continue; const d=de2000(lab,y.lab); all.push([d,y]); if(d<bd){bd=d;best=y;} }
   // near-ties: the yarn with the same strength of colour (a saturated yellow is 109 Gold, not the paler 469 Apricot: G logo 5169704)
-  if(window.CHROMA_TIE!==false){ const C=Math.hypot(lab[1],lab[2]); if(C>=30){ let bc=Math.abs(C-chromaOf(best.lab)); for(const [d,y] of all){ if(d>bd+1.0) continue; const dc=Math.abs(C-chromaOf(y.lab)); if(dc+8<bc){ bc=dc; best=y; } } } }
+  if(window.CHROMA_TIE!==false){ const C=Math.hypot(lab[1],lab[2]); if(C>=30){ let bc=Math.abs(C-chromaOf(best.lab)); const hu=l=>Math.atan2(l[2],l[1]), H=hu(lab); for(const [d,y] of all){ if(d>bd+1.0) continue; let dh=Math.abs(hu(y.lab)-H); if(dh>Math.PI) dh=2*Math.PI-dh; if(dh>0.26) continue; /* same hue only (maroon stays brick red, not brown: Cara 5175841) */ const dc=Math.abs(C-chromaOf(y.lab)); if(dc+8<bc){ bc=dc; best=y; } } } }
   return {yarn:best,de:de2000(lab,best.lab)}; }
 const yarnBy=(pal,label)=>YARNS[pal].find(y=>y.label===label);
 /* Two clearly different logo colours (navy and royal blue triangles) must not share a yarn, or the shapes melt into one blob:
@@ -113,8 +113,10 @@ function applyLogoYarn0(){ const p=pal();
   if(S.logoYarn==="auto"){ // near-black lettering is black yarn (designers use black, not charcoal or anthracite: Gransier, Dreelside)
     const blk=extremeYarn(p,true); if(blk) for(const c of S.clusters) if(!c.bg && c.lab[0]<16 && chromaOf(c.lab)<8){ c.yarn=blk.label; c.de=de2000(c.lab,blk.lab); }
     return; }
-  const y=yarnBy(p,S.logoYarn); if(!y) return;
-  for(const c of S.clusters) if(!c.bg){ c.yarn=y.label; c.de=de2000(c.lab,y.lab); } }
+  const y=yarnBy(p,S.logoYarn); if(!y) return; const page=S.clusters.find(c=>c.bg&&!c.panel), mat=yarnBy(p,S.bg);
+  // one order colour for the logo: the paper-white details drawn inside the black artwork stay the mat colour, or the whole
+  // figure turns into one solid shape (Athletic Legion Club 5175711, "logo in C02")
+  for(const c of S.clusters) if(!c.bg){ if(page && mat && de2000(c.lab,page.lab)<10 && de2000(c.lab,y.lab)>=10){ c.yarn=mat.label; c.de=0; c.hole=true; continue; } c.yarn=y.label; c.de=de2000(c.lab,y.lab); } }
 
 /* ---------- image intake ---------- */
 const WORK_LONG=2000;
@@ -535,7 +537,10 @@ function analyze(){
     if(cand.length && (cand.length===1 || Math.abs(cand[0].qs.length-n)<Math.abs(cand[1].qs.length-n)) && lines.filter(l=>l.qs.length>=3).length>=1 && big.length>cand[0].qs.length){
       const L=cand[0], kill=new Set(L.qs); for(const o of items){ if(o.x0>=L.x0-2 && o.x1<=L.x1+2 && o.y0>=L.y0-0.5*(L.y1-L.y0) && o.y1<=L.y1+2) kill.add(o.q); } // dots and accents of that line
       let px=0; for(let i=0;i<N;i++) if(isL(i) && kill.has(cc.lab[i])) px++;
-      if(px<0.6*logoPx){ for(let i=0;i<N;i++){ if(!isL(i) || !kill.has(cc.lab[i])) continue; const v=idx[i]; idx[i]=DROP; cnt[v]--; if(DROP!==TR) cnt[DROP]++; else trN++; } S.wordRemoved=S.removeWord+" ("+L.qs.length+" letters)"; } } }
+      if(px<0.6*logoPx){ const pad=Math.round(0.3*(L.y1-L.y0+1)), X0=Math.max(0,L.x0-pad), X1=Math.min(w-1,L.x1+pad), Y0=Math.max(0,L.y0-pad), Y1=Math.min(h-1,L.y1+pad);
+        // the line's own pieces, and any crumbs of it inside its box (edge pixels of the letters left as specks: Winterplateau 5175945)
+        for(let i=0;i<N;i++){ if(!isL(i)) continue; const x=i%w, y=(i-x)/w, inBox=x>=X0&&x<=X1&&y>=Y0&&y<=Y1; if(!kill.has(cc.lab[i]) && !(inBox && cc.size[cc.lab[i]]<20)) continue; const v=idx[i]; idx[i]=DROP; cnt[v]--; if(DROP!==TR) cnt[DROP]++; else trN++; }
+        S.wordRemoved=S.removeWord+" ("+L.qs.length+" letters)"; } } }
   if(cents.some((c,k)=>!cnt[k] && k!==bgC && k!==panelC)){ // emptied colours leave the list (no empty layers)
     const map=new Int32Array(cents.length).fill(-1), nc=[], nn=[]; cents.forEach((c,k)=>{ if(cnt[k]||k===bgC||k===panelC){ map[k]=nc.length; nc.push(c); nn.push(cnt[k]); } });
     for(let i=0;i<N;i++){ const v=idx[i]; if(v!==TR) idx[i]=map[v]; } bgC= bgC>=0? map[bgC] : -1; panelC= panelC>=0? map[panelC] : -1; cents=nc; cnt=Float64Array.from(nn); }
@@ -917,7 +922,7 @@ function contrastSwap(){ const p=pal(), bg=yarnBy(p,S.innerPanel||S.bg); if(!bg)
   if(S.logoYarn==="auto" && !S.orderLogo && window.HUE_LIFT!==false){ const up=bg.lab[0]<50, hue=l=>Math.atan2(l[2],l[1]);
     for(const c of S.clusters){ if(c.bg||c.hole) continue; const y=yarnBy(p,c.yarn); if(!y || chromaOf(y.lab)<15 || chromaOf(c.lab)<15 || chromaOf(c.lab)>=60) continue; // a vivid colour (red berries on brown) stands out anyway
       if(Math.abs(y.lab[0]-bg.lab[0])>=8 || de2000(y.lab,bg.lab)>=40) continue;
-      const fam=colourFamily(c.hex); let b=null,bd=1e9; for(const z of YARNS[p]){ if(z.manual||chromaOf(z.lab)<15||colourFamily(z.hex)!==fam) continue; // the same colour name: a green stays a green
+      const fam=colourFamily(c.hex); if(fam!=='green' && fam!=='blue') continue; /* seen on greens and blues; a dark red on grey is kept (Cara 5175841) */ let b=null,bd=1e9; for(const z of YARNS[p]){ if(z.manual||chromaOf(z.lab)<15||colourFamily(z.hex)!==fam) continue; // the same colour name: a green stays a green
         if((up? z.lab[0]-bg.lab[0] : bg.lab[0]-z.lab[0])<6) continue; const d=Math.hypot(c.lab[0]-z.lab[0],c.lab[1]-z.lab[1],c.lab[2]-z.lab[2]); if(d<bd){ bd=d; b=z; } } /* plain Lab distance keeps the saturation: light blue, not lavender */
       if(b){ S.swapped.push(c.yarn+" → "+b.label+" (contrast with the mat)"); c.yarn=b.label; c.de=de2000(c.lab,b.lab); } } }
   for(const c of S.clusters){ if(c.bg||(c.hole&&c.yarn===S.bg&&!S.innerPanel)) continue; const y=yarnBy(p,c.yarn); if(!y) continue;
@@ -998,6 +1003,15 @@ function computeBBox(){
   let x0=w,y0=h,x1=-1,y1=-1;
   for(let y=0;y<h;y++) for(let x=0;x<w;x++){ if(!isBg(idx[y*w+x])){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; } }
   S.bbox = x1<0? {x:0,y:0,w:w,h:h} : {x:x0,y:y0,w:x1-x0+1,h:y1-y0+1};
+  // A logo inside a rectangular frame (Parc Fermé 5175873): the frame is the mat's border line, designers put it close to the edge.
+  // Frame = the logo's outer rows and columns are inked along most of their length, and the inside is mostly empty.
+  S.frameLogo=false;
+  if(x1>x0+20 && y1>y0+20){ const band=Math.max(2,Math.round(0.02*Math.min(x1-x0,y1-y0))); let ok=0;
+    const rowInk=(y)=>{ let n=0; for(let x=x0;x<=x1;x++) if(!isBg(idx[y*w+x])) n++; return n/(x1-x0+1); }, colInk=(x)=>{ let n=0; for(let y=y0;y<=y1;y++) if(!isBg(idx[y*w+x])) n++; return n/(y1-y0+1); };
+    const side=(f,a,b,dir)=>{ let m=0; for(let i=0;i<=band;i++) m=Math.max(m,f(dir>0? a+i : b-i)); return m; };
+    if(side(rowInk,y0,y1,1)>0.85) ok++; if(side(rowInk,y0,y1,-1)>0.85) ok++; if(side(colInk,x0,x1,1)>0.85) ok++; if(side(colInk,x0,x1,-1)>0.85) ok++;
+    let inner=0, tot=0; for(let y=y0+3*band;y<=y1-3*band;y+=2) for(let x=x0+3*band;x<=x1-3*band;x+=2){ tot++; if(!isBg(idx[y*w+x])) inner++; }
+    S.frameLogo= ok===4 && tot>0 && inner/tot<0.4; }
 }
 
 /* ---------- yarn map UI ---------- */
@@ -1159,7 +1173,7 @@ function flattenContour(ct,map,step){
 /* ---------- layout (all in mm) ---------- */
 function layout(){
   const matW=S.w*10, matH=S.h*10, bw=S.border!=="none"? S.borderW*10 : 0, edge=S.edgeCm? S.edgeCm*10 : null;
-  let margin= edge!=null && !S.innerPanel ? edge : Math.min(matW,matH)*(S.fill?0.03:0.07), panel=null, off=bw;
+  let margin= edge!=null && !S.innerPanel ? edge : Math.min(matW,matH)*(S.fill||S.frameLogo?0.03:0.07), panel=null, off=bw;
   if(S.innerPanel && !S.plain){ const e=edge!=null? edge : Math.min(matW,matH)*0.1; panel={x:bw+e,y:bw+e,w:matW-2*(bw+e),h:matH-2*(bw+e),yarn:S.innerPanel}; off=bw+e; margin=Math.min(panel.w,panel.h)*0.12; }
   const bb=S.bbox||{x:0,y:0,w:1,h:1}, a=bb.w/bb.h;
   let aw=matW-2*(off+margin), ah=matH-2*(off+margin), ccy=matH/2;
@@ -1168,7 +1182,10 @@ function layout(){
     const v=1/Math.sqrt(a*a/(rx*rx)+1/(ry*ry)); aw=2*a*v*0.88; ah=2*v*0.88; }
   else if(S.corner==="arch"){ // box standing on the flat bottom, under the half-ellipse
     const rx=matW/2-bw, ry=matH-2*bw, t=1/Math.sqrt(a*a/(4*rx*rx)+1/(ry*ry)); aw=a*t*0.82; ah=t*0.82; ccy=matH-bw-t*0.5; }
-  let k=Math.max(1e-6,Math.min(aw/bb.w, ah/bb.h))*(S.fill?Math.max(S.scale,1):S.scale);
+  let k=Math.max(1e-6,Math.min(aw/bb.w, ah/bb.h))*(S.fill||S.frameLogo?Math.max(S.scale,1):S.scale);
+  { const kMax=Math.min((matW-2*(off+Math.min(matW,matH)*0.02))/bb.w,(matH-2*(off+Math.min(matW,matH)*0.02))/bb.h); // never closer than 2% to the edge
+    if(S.logoCm && S.logoCm.v>0){ k=Math.min(kMax, S.logoCm.v*10/(S.logoCm.dim==="h"? bb.h : bb.w)); }
+    else if(S.bigger && S.bigger!==1) k=Math.min(kMax, k*S.bigger); }
   let cx=matW/2+S.dx/100*matW, cy=ccy+S.dy/100*matH;
   if(S.corner==="square"||S.corner==="rounded"){ const lw=bb.w*k, lh=bb.h*k, m0=off+margin;
     if(S.alignX==="left") cx=m0+lw/2+S.dx/100*matW; else if(S.alignX==="right") cx=matW-m0-lw/2+S.dx/100*matW;
@@ -1743,7 +1760,13 @@ $("bCopy").onclick=()=>{ const t=specText(); navigator.clipboard.writeText(t).th
 /* ---------- fill from the order page ---------- */
 function findYarn(p,text){
   if(!text) return null; const t=text.trim().toLowerCase().replace(/\s+/g," "); if(!t) return null; const Y=YARNS[p], first=t.split(" ")[0];
-  return Y.find(y=>y.label.toLowerCase()===t) || Y.find(y=>y.code.toLowerCase()===first && /\d/.test(first)) || Y.find(y=>y.name && y.name.toLowerCase()===t) || Y.find(y=>y.name && t.includes(y.name.toLowerCase())) || null;
+  const exact=Y.find(y=>y.label.toLowerCase()===t); if(exact) return exact;
+  // a code with a name that is not this range's name for it ("C04 Dark Grey" on a ColorStar HD order, where C04 is Coral:
+  // Winterplateau 5175945): the name wins when this range has a yarn of that name
+  const rest=t.split(" ").slice(1).join(" "), byName=rest? (Y.find(y=>y.name && y.name.toLowerCase()===rest) || Y.find(y=>y.name && rest.includes(y.name.toLowerCase()))) : null;
+  const byCode=Y.find(y=>y.code.toLowerCase()===first && /\d/.test(first));
+  if(byCode && byName && byCode!==byName && !byCode.name.toLowerCase().includes(rest)) return byName;
+  return byCode || Y.find(y=>y.name && y.name.toLowerCase()===t) || Y.find(y=>y.name && t.includes(y.name.toLowerCase())) || null;
 }
 /* Yarn codes written in free text: "c11", "C5", "J01", "B8", "394 Champagne". Letter codes are matched anywhere;
    plain numbers (Classic Impression) only when the yarn's name follows or a colour word comes before. */
@@ -1832,7 +1855,7 @@ function readSpecial(p,sp){
   // "use the blue in text and logo": a plain colour word for the logo, matched later to that colour in the artwork (Nord Anglia 5159147)
   if(!res.logo.length){ for(const cl of clauses){ if(!LOGO_WORDS.test(cl)) continue; const lc=cl.toLowerCase();
       for(const [fam,re] of COLOUR_WORDS){ const m=lc.match(re); if(!m) continue; const before=lc.slice(Math.max(0,m.index-18),m.index);
-        if(/(background|fond|hintergrund|fondo|achtergrond)\W*$/.test(before) || NEG.test(before)) continue;
+        if(/(background|fond|fondo|hintergrund|achtergrond|tapis|felpudo|alfombra|matt?e?)(\W+[a-zà-ÿ]{1,4}){0,2}\W*$/.test(before) || NEG.test(before)) continue; // "el fondo en gris oscuro" is the mat (Do Laundry 5176483)
         const after=lc.slice(m.index+m[0].length, m.index+m[0].length+16); if(/^\W*(background|fond|hintergrund|fondo|achtergrond)/.test(after)) continue;
         res.logoWord=fam; break; } if(res.logoWord) break; }
     if(res.logoWord) res.notes.push("Logo in "+res.logoWord+" (from instructions): the "+res.logoWord+" of the artwork, or the nearest yarn."); }
@@ -1840,11 +1863,20 @@ function readSpecial(p,sp){
   else if(/\b(ovale?|ovaal|oválne|ovális)\b/.test(t)) res.shape="oval";
   else if(/\b(circle|circular|round mat|rond|runde?|kreis|cirkel|kör|kruh|redond[ao]|rotond[ao]|circolare|okrągł\w*|kulat\w*)\b|diameter|diamètre|durchmesser|(^|\s)ø\s*\d/.test(t) && !/round(ed)?\s+corner/.test(t)) res.shape="circle";
   { // placement: "le logo doit être placé à gauche" (Deco Cuisine 5157385); only when one side is named
-    const L=/\b(left|links|izquierda|sinistra|esquerda)\b|à gauche|a gauche/.test(t), R=/\b(right|rechts|derecha|destra|direita)\b|à droite|a droite/.test(t);
-    const T=/\b(top|oben|arriba)\b|en haut|in alto|bovenaan/.test(t), B=/\b(bottom|unten|abajo)\b|en bas|in basso|onderaan/.test(t);
+    // the side must belong to the logo's placement, not describe a part of it ("including the little part on the left side",
+    // Winterplateau 5175945): a placement or logo word shortly before it
+    const P="(?:logo|design|emblem|text|place[ds]?|put|position\\w*|align\\w*|centr\\w*|plac[ée]\\w*|placer|mettre|mis|coloca\\w*|posiz\\w*|platzier\\w*|setzen|zet|links|upper half|lower half)", near=w=>new RegExp(P+"[^.()]{0,45}?(?:"+w+")").test(t);
+    const L=near("\\b(?:left|links|izquierda|sinistra|esquerda)\\b|à gauche|a gauche"), R=near("\\b(?:right|rechts|derecha|destra|direita)\\b|à droite|a droite");
+    const T=near("\\b(?:top|oben|arriba)\\b|en haut|in alto|bovenaan")||/upper half|top half|moitié supérieure|obere hälfte/.test(t), B=near("\\b(?:bottom|unten|abajo)\\b|en bas|in basso|onderaan")||/lower half|bottom half|moitié inférieure|untere hälfte/.test(t);
     if(L!==R) res.alignX=L?"left":"right"; if(T!==B) res.alignY=T?"top":"bottom";
     if(res.alignX||res.alignY) res.notes.push("Logo placed "+[res.alignY,res.alignX].filter(Boolean).join(" ")+" (from instructions): check the position and size."); }
   // "mettre le logo sur toute la dimension du tapis": the logo fills the mat, small margin
+  // "the logo should be around 85cm wide" (5175810) / "logo ... 40 cm high": the logo's size on the mat
+  { const m=t.match(/\b(?:logo|design|emblem|text|schriftzug|logotipo)\b[^.]{0,40}?(\d{2,3}(?:[.,]\d)?)\s*cm\s*(?:\(?\s*)?(wide|width|breit|breite|large|largeur|de large|ancho|de ancho|larg[ou]|high|height|tall|hoch|h[öo]he|haut|hauteur|alto|de alto)\b/) || t.match(/\b(wide|width|breite|largeur|ancho|high|height|h[öo]he|hauteur|alto)\b[^.]{0,12}?(?:of\s+)?(?:the\s+)?logo[^.]{0,12}?(\d{2,3}(?:[.,]\d)?)\s*cm/);
+    if(m){ const a=/\d/.test(m[1])? [m[1],m[2]] : [m[2],m[1]], v=parseFloat(a[0].replace(",",".")); if(v>=10 && v<=400){ res.logoCm={v, dim:/high|height|tall|hoch|h[öo]he|haut|alto/.test(a[1])?"h":"w"}; res.notes.push("Logo "+v+" cm "+(res.logoCm.dim==="h"?"high":"wide")+" (from instructions)."); } } }
+  // "logo bigger 20%" (5175711)
+  { const m=t.match(/\b(?:bigger|larger|gr[öo]sser|größer|plus grand|m[áa]s grande|maior|pi[uù] grande|groter)\b[^.\d]{0,12}(\d{1,2})\s*%/) || t.match(/(\d{1,2})\s*%\s*(?:bigger|larger|gr[öo]sser|größer|plus grand|m[áa]s grande|maior|groter)/);
+    if(m){ res.bigger=1+(+m[1])/100; res.notes.push("Logo "+m[1]+"% bigger (from instructions)."); } }
   // "I would like the symbol above in a larger size ... the text should be below" (Alingsåshem 5169405): stack the emblem over the text
   if(/\b(symbol|symbole|s[ií]mbolo|simbolo|symbolen|icon|icono|emblem|embl[eè]me|logo|logotipo|bild|picture|image)\b[^.]{0,40}\b(above|on top|over the text|au-dessus|en haut|encima|arriba|sopra|oben|ovanf[öo]r|ovanp[åa]|boven)\b/.test(t) || /\b(text|texte|texto|testo|schrift|texten|tekst)\b[^.]{0,40}\b(below|underneath|under|beneath|en dessous|au-dessous|debajo|abajo|sotto|unten|nedanf[öo]r|under|onder)\b/.test(t)){ res.stack=true; res.notes.push("Emblem placed above the text, larger (from instructions)."); }
   if(/toute la (dimension|surface|largeur|taille)|tout le tapis|full (size|width|mat)|whole (mat|size)|entire mat|fill the (whole|mat|entire)|ganze[nr]? (matte|fläche|breite)|gesamte|todo el (tapete|felpudo|ancho)|tutta la (superficie|dimensione)|as much (of the )?(surface|space|area)|stretch it|as large as possible|as big as possible|so gro(ß|ss) wie m(ö|o)glich|lo m(á|a)s grande posible/.test(t)){ res.fill=true; res.notes.push("Logo enlarged to fill the mat (from instructions)."); }
@@ -1867,7 +1899,7 @@ function fillFromOrder(txt){
   const num=v=>parseFloat(String(v).replace(",","."));
   const done=[], missed=[];
   // every order starts from a clean slate
-  S.edgeCm=null; S.alignX=null; S.alignY=null; S.fill=false; S.stackReq=false; S.removeWord=null; S.logoWord=null; S.colourMap=[]; S.innerPanel=null; S.bgLocked=false; S.bgSrc=null; S.bgOrder=null; S.photoReq=false; S.photoUser=false; S.logoSet=[]; S.logoYarn="auto"; S.photo=false; S.keepAll=false; S.orderNotes=[]; S.corner="square"; $("corner").value="square";
+  S.edgeCm=null; S.alignX=null; S.alignY=null; S.fill=false; S.stackReq=false; S.removeWord=null; S.logoCm=null; S.bigger=1; S.logoWord=null; S.colourMap=[]; S.innerPanel=null; S.bgLocked=false; S.bgSrc=null; S.bgOrder=null; S.photoReq=false; S.photoUser=false; S.logoSet=[]; S.logoYarn="auto"; S.photo=false; S.keepAll=false; S.orderNotes=[]; S.corner="square"; $("corner").value="square";
   S.minDetail=3; $("minDetail").value=3; const ph0=$("photoMode"); if(ph0) ph0.checked=false;
   const id=(txt.match(/Design Number\s*:?\s*(\d{4,})/i)||txt.match(/Design Number[\s\S]{0,60}?\b(\d{6,8})\b/i)||[])[1]; if(id){ S.id=id; $("designId").value=id; done.push("design "+id); } else missed.push("design ID");
   const prod=(txt.match(/^[ \t]*\d+\s*-\s*(.*(?:impression|colou?r\s*star|promo|scrape).*)$/im)||[])[1]||"";
@@ -1901,7 +1933,7 @@ function fillFromOrder(txt){
     if(set.length===1){ S.logoYarn=set[0]; S.logoSet=[]; } else if(set.length>1){ S.logoSet=set; S.logoYarn="set"; }
     notes.push("logo "+set.join(" + ")+" (from instructions)"); }
   if(SP.edgeCm) S.edgeCm=SP.edgeCm;
-  S.alignX=SP.alignX; S.alignY=SP.alignY; S.fill=SP.fill; S.stackReq=!!SP.stack; S.removeWord=SP.removeWord||null; S.logoWord=SP.logoWord; S.colourMap=SP.colourMap; if(SP.logoWord){ S.orderLogo=true; notes.push("logo "+SP.logoWord); } if(SP.fill) notes.push("logo fills the mat"); if(SP.logo.length) S.orderLogo=true; if(SP.alignX||SP.alignY) notes.push("logo "+[SP.alignY,SP.alignX].filter(Boolean).join(" "));
+  S.alignX=SP.alignX; S.alignY=SP.alignY; S.fill=SP.fill; S.stackReq=!!SP.stack; S.removeWord=SP.removeWord||null; S.logoCm=SP.logoCm||null; S.bigger=SP.bigger||1; S.logoWord=SP.logoWord; S.colourMap=SP.colourMap; if(SP.logoWord){ S.orderLogo=true; notes.push("logo "+SP.logoWord); } if(SP.fill) notes.push("logo fills the mat"); if(SP.logo.length) S.orderLogo=true; if(SP.alignX||SP.alignY) notes.push("logo "+[SP.alignY,SP.alignX].filter(Boolean).join(" "));
   if(SP.shape){ S.corner=SP.shape; $("corner").value=SP.shape; notes.push(SP.shape+" mat"); }
   if(SP.photo){ S.photoReq=true; notes.push("photo-realistic artwork requested"); }
   if(SP.keepAll){ S.keepAll=true; S.minDetail=1; $("minDetail").value=1; notes.push("keep all small details"); }
